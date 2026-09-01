@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<!-- viewport-fit=cover 讓頁面延伸到 iPhone 瀏海與底部橫條區域，再由 CSS 的 safe-area-inset 補回內距 -->
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+<title>MoneyBook 記帳</title>
+<meta name="description" content="完全離線的個人記帳與資產管理工具，資料只存在你的裝置上">
+
+<!-- PWA -->
+<link rel="manifest" href="./manifest.webmanifest">
+<meta name="theme-color" content="#2563eb" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0f172a" media="(prefers-color-scheme: dark)">
+
+<!-- iOS 專用：加到主畫面後以全螢幕模式開啟，狀態列文字轉為淺色 -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="MoneyBook">
+<link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
+<link rel="icon" href="./icons/icon-192.png" sizes="192x192">
+
+<link rel="stylesheet" href="./css/app.css">
+</head>
+<body>
+  <div id="app" class="app">
+    <div id="boot" class="boot">
+      <div class="boot__logo">💰</div>
+      <p class="boot__text">載入中…</p>
+      <noscript>
+        <p class="boot__text">這個 App 需要 JavaScript 才能運作，請在瀏覽器設定中啟用。</p>
+      </noscript>
+    </div>
+  </div>
+  <script type="module" src="./js/app.js"></script>
+</body>
+</html>

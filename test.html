@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MoneyBook 自我測試</title>
+<style>
+  body {
+    font-family: system-ui, -apple-system, "Noto Sans TC", "Microsoft JhengHei", sans-serif;
+    margin: 0; padding: 16px; background: #f4f5f7; color: #111827; line-height: 1.5;
+  }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .sub { color: #6b7280; font-size: 13px; margin: 0 0 16px; }
+  .banner {
+    background: #dbeafe; border: 1px solid #93c5fd; border-radius: 10px;
+    padding: 10px 12px; font-size: 13px; margin-bottom: 16px;
+  }
+  .summary {
+    display: flex; gap: 10px; margin-bottom: 14px; font-weight: 600;
+    position: sticky; top: 0; background: #f4f5f7; padding: 8px 0; z-index: 1;
+  }
+  .pill { border-radius: 999px; padding: 6px 14px; font-size: 14px; }
+  .pill.pass { background: #dcfce7; color: #166534; }
+  .pill.fail { background: #fee2e2; color: #991b1b; }
+  .pill.run  { background: #e0e7ff; color: #3730a3; }
+  .group { margin-bottom: 18px; }
+  .group h2 { font-size: 14px; margin: 0 0 6px; color: #374151; }
+  .case {
+    background: #fff; border-radius: 8px; padding: 9px 12px; margin-bottom: 4px;
+    font-size: 13px; display: flex; gap: 9px; align-items: flex-start;
+    border-left: 3px solid #d1d5db;
+  }
+  .case.ok { border-left-color: #16a34a; }
+  .case.ng { border-left-color: #dc2626; background: #fef2f2; }
+  .case__mark { font-weight: 700; }
+  .case.ok .case__mark { color: #16a34a; }
+  .case.ng .case__mark { color: #dc2626; }
+  .case__body { flex: 1; min-width: 0; }
+  .case__msg {
+    color: #991b1b; font-family: ui-monospace, Menlo, monospace; font-size: 12px;
+    white-space: pre-wrap; word-break: break-all; margin-top: 3px;
+  }
+  button {
+    background: #2563eb; color: #fff; border: 0; border-radius: 8px;
+    padding: 10px 18px; font-size: 14px; font-weight: 600; cursor: pointer;
+  }
+</style>
+</head>
+<body>
+<h1>MoneyBook 自我測試</h1>
+<p class="sub">驗證資料庫讀寫、金額計算、備份還原是否正確。</p>
+<div class="banner">
+  這個頁面使用獨立的測試資料庫 <code>moneybook-selftest</code>，
+  <strong>不會動到你在 App 裡記的任何一筆帳</strong>，測試結束後會自動刪除。
+</div>
+<div class="summary">
+  <span class="pill run" id="pill-total">執行中…</span>
+  <span class="pill pass" id="pill-pass">通過 0</span>
+  <span class="pill fail" id="pill-fail">失敗 0</span>
+</div>
+<div id="results"></div>
+<p><button type="button" onclick="location.reload()">重新執行</button></p>
+
+<script type="module">
+import * as db from './js/db.js';
+import * as store from './js/store.js';
+import { parseAmount, formatAmount, evaluateExpression } from './js/lib/money.js';
+import { accountBalances, netWorth, summarize, groupByCategory } from './js/lib/stats.js';
+import { serializeBackup, parseBackup } from './js/lib/backup.js';
+import { todayISO } from './js/lib/dateutil.js';
+
+const results = document.getElementById('results');
+let pass = 0;
+let fail = 0;
+let group = null;
+
+function startGroup(title) {
+  group = document.createElement('div');
+  group.className = 'group';
+  const h = document.createElement('h2');
+  h.textContent = title;
+  group.append(h);
+  results.append(group);
+}
+
+function record(name, ok, message = '') {
+  const row = document.createElement('div');
+  row.className = `case ${ok ? 'ok' : 'ng'}`;
+  const mark = document.createElement('span');
+  mark.className = 'case__mark';
+  mark.textContent = ok ? '✓' : '✗';
+  const body = document.createElement('div');
+  body.className = 'case__body';
+  body.textContent = name;
+  if (!ok && message) {
+    const msg = document.createElement('div');
+    msg.className = 'case__msg';
+    msg.textContent = message;
+    body.append(msg);
+  }
+  row.append(mark, body);
+  group.append(row);
+
+  if (ok) pass++; else fail++;
+  document.getElementById('pill-pass').textContent = `通過 ${pass}`;
+  document.getElementById('pill-fail').textContent = `失敗 ${fail}`;
+}
+
+async function check(name, fn) {
+  try {
+    await fn();
+    record(name, true);
+  } catch (err) {
+    record(name, false, String(err?.message ?? err));
+  }
+}
+
+function assert(condition, message) {
+  if (!condition) throw new Error(message ?? '斷言失敗');
+}
+
+function assertEqual(actual, expected, label = '') {
+  if (actual !== expected) {
+    throw new Error(`${label}預期 ${JSON.stringify(expected)}，實際 ${JSON.stringify(actual)}`);
+  }
+}
+
+async function run() {
+  // 全程使用獨立資料庫，確保不會碰到使用者的正式資料
+  db.useDatabase('moneybook-selftest');
+  await db.deleteDatabase();
+  db.useDatabase('moneybook-selftest');
+
+  // ---------------------------------------------------------------- 環境
+  startGroup('1. 瀏覽器環境');
+
+  await check('支援 IndexedDB', () => assert(Boolean(globalThis.indexedDB)));
+  await check('支援 ES 模組動態載入', () => assert(typeof store.init === 'function'));
+  await check('確認使用的是測試資料庫', () => assertEqual(db.currentDatabaseName(), 'moneybook-selftest'));
+  await check('支援 crypto.randomUUID 或有替代方案', () => {
+    const { newId } = { newId: () => crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}` };
+    assert(typeof newId() === 'string');
+  });
+
+  // ---------------------------------------------------------------- 純函式
+  startGroup('2. 金額與統計（瀏覽器端複驗）');
+
+  await check('parseAmount 處理全形與千分位', () => {
+    assertEqual(parseAmount('1,234.5'), 123450);
+    assertEqual(parseAmount('１２３'), 12300);
+    assertEqual(parseAmount('abc'), null);
+  });
+  await check('parseAmount 沒有浮點誤差', () => {
+    assertEqual(parseAmount('19.99'), 1999);
+    assertEqual(parseAmount('8.29'), 829);
+  });
+  await check('formatAmount 顯示格式正確', () => {
+    assertEqual(formatAmount(123450), '1,234.50');
+    assertEqual(formatAmount(10000), '100');
+  });
+  await check('evaluateExpression 算式運算', () => {
+    assertEqual(evaluateExpression('35+50'), 8500);
+    assertEqual(evaluateExpression('100-30'), 7000);
+    assertEqual(evaluateExpression('35+50*2'), 13500);
+  });
+
+  // ---------------------------------------------------------------- 初始化
+  startGroup('3. 資料庫初始化');
+
+  await check('首次啟動建立預設帳戶與分類', async () => {
+    await store.init();
+    assert(store.state.accounts.length >= 2, `帳戶數為 ${store.state.accounts.length}`);
+    assert(store.state.categories.length >= 10, `分類數為 ${store.state.categories.length}`);
+    assert(store.state.ready);
+  });
+
+  await check('重複初始化不會重複塞入預設資料', async () => {
+    const before = store.state.categories.length;
+    await db.seedIfEmpty();
+    await store.reload();
+    assertEqual(store.state.categories.length, before, '分類數量改變：');
+  });
+
+  // ---------------------------------------------------------------- 交易
+  startGroup('4. 記帳與餘額');
+
+  let cashId, bankId, cardId, foodId, salaryId;
+
+  await check('建立測試帳戶', async () => {
+    const cash = await store.saveAccount({ name: '測試現金', kind: 'cash', valuationMode: 'tracked', openingBalance: 500000 });
+    const bank = await store.saveAccount({ name: '測試銀行', kind: 'bank', valuationMode: 'tracked', openingBalance: 10000000 });
+    const card = await store.saveAccount({ name: '測試信用卡', kind: 'credit', valuationMode: 'tracked', openingBalance: 0 });
+    assert(cash.ok && bank.ok && card.ok);
+    cashId = cash.value.id; bankId = bank.value.id; cardId = card.value.id;
+  });
+
+  await check('取得分類 ID', () => {
+    foodId = store.state.categories.find((c) => c.type === 'expense').id;
+    salaryId = store.state.categories.find((c) => c.type === 'income').id;
+    assert(foodId && salaryId);
+  });
+
+  await check('新增支出並寫入資料庫', async () => {
+    const r = await store.saveTransaction({
+      type: 'expense', date: todayISO(), amount: 12000,
+      accountId: cashId, categoryId: foodId, note: '午餐',
+    });
+    assert(r.ok, r.error);
+    await store.reload();
+    const saved = store.state.transactions.find((t) => t.note === '午餐');
+    assert(saved, '重新載入後找不到剛存的交易');
+    assertEqual(saved.amount, 12000);
+  });
+
+  await check('金額為 0 的交易會被拒絕', async () => {
+    const r = await store.saveTransaction({
+      type: 'expense', date: todayISO(), amount: 0, accountId: cashId, categoryId: foodId,
+    });
+    assert(!r.ok, '金額 0 竟然存進去了');
+  });
+
+  await check('不存在的帳戶會被拒絕', async () => {
+    const r = await store.saveTransaction({
+      type: 'expense', date: todayISO(), amount: 100, accountId: 'ghost-account', categoryId: foodId,
+    });
+    assert(!r.ok);
+  });
+
+  await check('新增收入與信用卡支出', async () => {
+    const a = await store.saveTransaction({
+      type: 'income', date: todayISO(), amount: 8000000, accountId: bankId, categoryId: salaryId,
+    });
+    const b = await store.saveTransaction({
+      type: 'expense', date: todayISO(), amount: 30000, accountId: cardId, categoryId: foodId,
+    });
+    assert(a.ok && b.ok);
+  });
+
+  await check('帳戶餘額計算正確', () => {
+    const balances = accountBalances(store.state.accounts, store.state.transactions);
+    assertEqual(balances.get(cashId), 500000 - 12000, '現金：');
+    assertEqual(balances.get(bankId), 10000000 + 8000000, '銀行：');
+    assertEqual(balances.get(cardId), -30000, '信用卡（刷卡後應為負債）：');
+  });
+
+  await check('轉帳同時扣減與增加兩個帳戶', async () => {
+    const before = accountBalances(store.state.accounts, store.state.transactions);
+    const r = await store.saveTransaction({
+      type: 'transfer', date: todayISO(), amount: 100000, accountId: bankId, toAccountId: cashId,
+    });
+    assert(r.ok, r.error);
+    const after = accountBalances(store.state.accounts, store.state.transactions);
+    assertEqual(after.get(bankId), before.get(bankId) - 100000, '轉出帳戶：');
+    assertEqual(after.get(cashId), before.get(cashId) + 100000, '轉入帳戶：');
+  });
+
+  await check('轉帳不計入收入或支出統計', () => {
+    const s = summarize(store.state.transactions);
+    assertEqual(s.income, 8000000, '收入：');
+    assertEqual(s.expense, 12000 + 30000, '支出：');
+  });
+
+  await check('轉入與轉出不能是同一個帳戶', async () => {
+    const r = await store.saveTransaction({
+      type: 'transfer', date: todayISO(), amount: 100, accountId: cashId, toAccountId: cashId,
+    });
+    assert(!r.ok);
+  });
+
+  // ---------------------------------------------------------------- 資產
+  startGroup('5. 手動估值與淨資產');
+
+  let houseId, loanId;
+
+  await check('建立手動估值的資產與負債', async () => {
+    const house = await store.saveAccount({ name: '測試房產', kind: 'property', valuationMode: 'manual', manualValue: 1200000000 });
+    const loan = await store.saveAccount({ name: '測試房貸', kind: 'loan', valuationMode: 'manual', manualValue: -800000000 });
+    assert(house.ok && loan.ok);
+    houseId = house.value.id; loanId = loan.value.id;
+  });
+
+  await check('手動估值帳戶不受交易影響', async () => {
+    await store.saveTransaction({
+      type: 'expense', date: todayISO(), amount: 500000, accountId: houseId, categoryId: foodId, note: '測試干擾',
+    });
+    const balances = accountBalances(store.state.accounts, store.state.transactions);
+    assertEqual(balances.get(houseId), 1200000000);
+    assertEqual(balances.get(loanId), -800000000);
+  });
+
+  await check('淨資產＝總資產－總負債', () => {
+    const nw = store.currentNetWorth();
+    assertEqual(nw.net, nw.assets - nw.liabilities);
+    assert(nw.liabilities >= 800000000, `負債應至少包含房貸，實際 ${nw.liabilities}`);
+  });
+
+  await check('更新估值後淨資產跟著變動', async () => {
+    const before = store.currentNetWorth().net;
+    const house = store.state.accounts.find((a) => a.id === houseId);
+    await store.saveAccount({ ...house, manualValue: 1300000000 });
+    assertEqual(store.currentNetWorth().net, before + 100000000);
+  });
+
+  await check('封存的帳戶不列入淨資產', async () => {
+    const before = store.currentNetWorth().net;
+    const house = store.state.accounts.find((a) => a.id === houseId);
+    await store.saveAccount({ ...house, archived: true });
+    assertEqual(store.currentNetWorth().net, before - 1300000000);
+    await store.saveAccount({ ...house, archived: false });
+  });
+
+  // ---------------------------------------------------------------- 快照
+  startGroup('6. 淨資產快照');
+
+  await check('儲存快照', async () => {
+    const r = await store.takeSnapshot('測試快照');
+    assert(r.ok, r.error);
+    assertEqual(store.state.snapshots.length, 1);
+    assertEqual(r.value.net, store.currentNetWorth().net);
+  });
+
+  await check('同一天重複儲存會覆蓋而非新增', async () => {
+    const r = await store.takeSnapshot('第二次');
+    assert(r.ok);
+    assertEqual(store.state.snapshots.length, 1, '快照數量：');
+    assertEqual(store.state.snapshots[0].note, '第二次');
+  });
+
+  await check('快照在重新載入後仍存在', async () => {
+    await store.reload();
+    assertEqual(store.state.snapshots.length, 1);
+  });
+
+  // ---------------------------------------------------------------- 刪除保護
+  startGroup('7. 資料完整性保護');
+
+  await check('有交易的帳戶不能刪除', async () => {
+    const r = await store.deleteAccount(cashId);
+    assert(!r.ok, '有交易的帳戶竟然被刪掉了');
+  });
+
+  await check('有交易的分類不能刪除', async () => {
+    const r = await store.deleteCategory(foodId);
+    assert(!r.ok);
+  });
+
+  await check('沒有交易的帳戶可以刪除', async () => {
+    const tmp = await store.saveAccount({ name: '暫時帳戶', kind: 'other', valuationMode: 'manual', manualValue: 0 });
+    const r = await store.deleteAccount(tmp.value.id);
+    assert(r.ok, r.error);
+    assert(!store.state.accounts.some((a) => a.id === tmp.value.id));
+  });
+
+  await check('刪除交易後餘額回復', async () => {
+    const tx = store.state.transactions.find((t) => t.note === '午餐');
+    const before = accountBalances(store.state.accounts, store.state.transactions).get(cashId);
+    await store.deleteTransaction(tx.id);
+    const after = accountBalances(store.state.accounts, store.state.transactions).get(cashId);
+    assertEqual(after, before + 12000);
+  });
+
+  // ---------------------------------------------------------------- 備份
+  startGroup('8. 備份與還原（最關鍵的一組）');
+
+  let backupText;
+  let snapshotOfState;
+
+  await check('匯出備份內容', () => {
+    backupText = serializeBackup(store.exportPayload());
+    snapshotOfState = {
+      transactions: store.state.transactions.length,
+      accounts: store.state.accounts.length,
+      categories: store.state.categories.length,
+      snapshots: store.state.snapshots.length,
+      net: store.currentNetWorth().net,
+    };
+    assert(backupText.length > 100);
+    assert(JSON.parse(backupText).app === 'MoneyBook');
+  });
+
+  await check('清空全部資料', async () => {
+    await store.wipeEverything();
+    assertEqual(store.state.transactions.length, 0);
+    assertEqual(store.state.snapshots.length, 0);
+  });
+
+  await check('從備份還原後資料完全一致', async () => {
+    const parsed = parseBackup(backupText);
+    assert(parsed.ok, parsed.error);
+    await store.importReplace(parsed.data);
+
+    assertEqual(store.state.transactions.length, snapshotOfState.transactions, '交易筆數：');
+    assertEqual(store.state.accounts.length, snapshotOfState.accounts, '帳戶數：');
+    assertEqual(store.state.categories.length, snapshotOfState.categories, '分類數：');
+    assertEqual(store.state.snapshots.length, snapshotOfState.snapshots, '快照數：');
+    assertEqual(store.currentNetWorth().net, snapshotOfState.net, '淨資產：');
+  });
+
+  await check('還原後分類統計仍然正確', () => {
+    const rows = groupByCategory(store.state.transactions, 'expense');
+    assert(rows.length > 0);
+    assert(rows.every((r) => r.total > 0));
+  });
+
+  await check('合併匯入不會刪除既有資料', async () => {
+    const extra = await store.saveTransaction({
+      type: 'expense', date: todayISO(), amount: 999, accountId: bankId, categoryId: foodId, note: '合併測試',
+    });
+    assert(extra.ok);
+    const parsed = parseBackup(backupText);
+    await store.importMerge(parsed.data);
+    assert(store.state.transactions.some((t) => t.note === '合併測試'), '合併後原有的新資料消失了');
+  });
+
+  await check('損壞的備份檔會被拒絕', () => {
+    assert(!parseBackup('這不是 JSON').ok);
+    assert(!parseBackup('{"app":"其他程式"}').ok);
+  });
+
+  // ---------------------------------------------------------------- 收尾
+  startGroup('9. 收尾');
+
+  await check('刪除測試資料庫', async () => {
+    await db.deleteDatabase();
+    assert(true);
+  });
+
+  const total = pass + fail;
+  const pill = document.getElementById('pill-total');
+  pill.textContent = fail === 0 ? `全部 ${total} 項通過` : `${total} 項中有 ${fail} 項失敗`;
+  pill.className = `pill ${fail === 0 ? 'pass' : 'fail'}`;
+}
+
+run().catch((err) => {
+  startGroup('執行中斷');
+  record('測試程序異常終止', false, String(err?.stack ?? err));
+  const pill = document.getElementById('pill-total');
+  pill.textContent = '執行中斷';
+  pill.className = 'pill fail';
+});
+</script>
+</body>
+</html>

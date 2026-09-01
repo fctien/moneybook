@@ -1,0 +1,46 @@
+{
+  "name": "MoneyBook 記帳",
+  "short_name": "MoneyBook",
+  "description": "完全離線的個人記帳與資產管理工具，資料只存在你的裝置上",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f4f5f7",
+  "theme_color": "#2563eb",
+  "lang": "zh-Hant",
+  "dir": "ltr",
+  "categories": ["finance", "productivity"],
+  "icons": [
+    {
+      "src": "./icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./icons/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "快速記帳",
+      "short_name": "記帳",
+      "url": "./index.html#entry"
+    },
+    {
+      "name": "查看資產",
+      "short_name": "資產",
+      "url": "./index.html#assets"
+    }
+  ]
+}
