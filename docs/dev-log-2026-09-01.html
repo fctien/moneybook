@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MoneyBook 開發紀錄 2026-09-01</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --surface: #fff; --border: #e3e6ea; --text: #1a1d21;
+    --muted: #656d76; --accent: #2563eb; --ok: #16a34a; --bad: #dc2626;
+    --warn: #b45309; --warn-bg: #fef3c7; --code-bg: #f1f3f5;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1115; --surface: #171a1f; --border: #2b3038; --text: #e6e8eb;
+      --muted: #9aa4b0; --accent: #60a5fa; --ok: #4ade80; --bad: #f87171;
+      --warn: #fbbf24; --warn-bg: #3a2a06; --code-bg: #1e2229;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 32px 20px 64px; background: var(--bg); color: var(--text);
+    font-family: system-ui, -apple-system, "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", sans-serif;
+    line-height: 1.7; font-size: 15px;
+  }
+  .wrap { max-width: 880px; margin: 0 auto; }
+  header { border-bottom: 2px solid var(--accent); padding-bottom: 16px; margin-bottom: 28px; }
+  h1 { font-size: 25px; margin: 0 0 6px; }
+  .meta { color: var(--muted); font-size: 13px; }
+  .meta code { background: var(--code-bg); padding: 2px 6px; border-radius: 4px; font-size: 12px; }
+  h2 {
+    font-size: 18px; margin: 36px 0 12px; padding-left: 11px;
+    border-left: 4px solid var(--accent);
+  }
+  h3 { font-size: 15px; margin: 22px 0 8px; }
+  section { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 18px 22px; margin-bottom: 18px; }
+  table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 14px; }
+  th, td { border: 1px solid var(--border); padding: 8px 11px; text-align: left; vertical-align: top; }
+  th { background: var(--code-bg); font-weight: 600; }
+  code { background: var(--code-bg); padding: 2px 5px; border-radius: 4px; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 13px; }
+  pre { background: var(--code-bg); padding: 12px 14px; border-radius: 8px; overflow-x: auto; font-size: 13px; line-height: 1.5; }
+  pre code { background: none; padding: 0; }
+  ul, ol { padding-left: 22px; }
+  li { margin: 5px 0; }
+  .pill { display: inline-block; border-radius: 999px; padding: 2px 11px; font-size: 12px; font-weight: 600; }
+  .pill.ok { background: rgba(22,163,74,.14); color: var(--ok); }
+  .pill.bad { background: rgba(220,38,38,.14); color: var(--bad); }
+  .bug { border-left: 4px solid var(--bad); padding-left: 14px; margin: 18px 0; }
+  .bug h3 { margin-top: 0; }
+  .bug dl { margin: 8px 0 0; display: grid; grid-template-columns: max-content 1fr; gap: 5px 14px; font-size: 14px; }
+  .bug dt { color: var(--muted); }
+  .bug dd { margin: 0; }
+  .note {
+    background: var(--warn-bg); color: var(--warn); border-radius: 8px;
+    padding: 11px 14px; font-size: 14px; margin: 14px 0;
+  }
+  .muted { color: var(--muted); }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  @media (max-width: 640px) { .grid2 { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>MoneyBook 開發紀錄</h1>
+  <p class="meta">
+    日期：2026-09-01　·　專案：<code>MoneyBook/</code>　·　Commit：<code>41c19eca4ba41645be067c7950f4d8ceec3be073</code><br>
+    測試結果：<span class="pill ok">node 單元測試 38/38</span> <span class="pill ok">瀏覽器整合測試 39/39</span>
+  </p>
+</header>
+
+<section>
+  <h2>1. 需求演進</h2>
+  <p>需求分三輪收斂，每一輪都讓架構大幅簡化：</p>
+  <table>
+    <tr><th>輪次</th><th>使用者需求</th><th>對應架構</th></tr>
+    <tr>
+      <td>初始</td>
+      <td>記帳 + 資產紀錄，手機與電腦都要能用</td>
+      <td>評估五種方案，建議 PWA + Supabase 雲端同步</td>
+    </tr>
+    <tr>
+      <td>第二輪</td>
+      <td>資料要純本機不同步，但仍要全套功能含 CSV 匯入</td>
+      <td>指出「純本機」與「跨裝置」互斥，改提自架方案：<br>FastAPI + SQLite + Tailscale + 離線佇列</td>
+    </tr>
+    <tr>
+      <td>最終</td>
+      <td><strong>只要手機單機能用，資產直接手動輸入</strong></td>
+      <td>後端、同步、CSV 匯入全部拿掉。<br>純前端靜態 PWA + IndexedDB</td>
+    </tr>
+  </table>
+  <p class="muted">最終方案不需要 npm、不需要建置流程、不需要伺服器，也沒有任何 CDN 相依。</p>
+</section>
+
+<section>
+  <h2>2. 主要架構決策</h2>
+
+  <h3>2.1 金額用整數「分」儲存，且解析走純字串路徑</h3>
+  <p>記帳程式最忌浮點誤差累積。第一版 <code>parseAmount</code> 用了 <code>Number(value.toFixed(2)) * 100</code>，
+  測試立刻抓到 <code>'1.005'</code> 解析成 <code>100</code> 而非 <code>101</code> —— 因為 1.005 在 IEEE 754 下實際是 1.00499…。
+  改為直接切分整數與小數字串、取第三位小數做四捨五入，完全不碰浮點乘法。</p>
+
+  <h3>2.2 日期不使用 <code>toISOString()</code></h3>
+  <p>它會轉成 UTC，在台灣（UTC+8）會讓凌晨八點前記的帳掉到前一天。全程改用本地時區的 <code>YYYY-MM-DD</code> 字串。</p>
+
+  <h3>2.3 轉帳不計入收支統計</h3>
+  <p>還卡費、把錢轉去定存這類動作只是搬錢。若計入收支，月報表會被大幅灌水，日均支出也失真。</p>
+
+  <h3>2.4 帳戶分兩種估值方式</h3>
+  <table>
+    <tr><th>方式</th><th>適用</th><th>餘額來源</th></tr>
+    <tr><td>自動累算 <code>tracked</code></td><td>現金、銀行、信用卡</td><td>期初餘額 + 每筆交易加減</td></tr>
+    <tr><td>手動估值 <code>manual</code></td><td>股票、不動產、保單、貸款</td><td>使用者填的數字，不受交易影響</td></tr>
+  </table>
+  <p>股票市值與房價無法靠記帳推算，只能定期手動更新；而現金若也要手動填，記帳就失去意義。</p>
+
+  <h3>2.5 圖表自己用 Canvas 畫</h3>
+  <p>引入 Chart.js 這類 CDN 套件會讓 App 在飛航模式下變成一片空白，與「完全離線可用」的前提衝突。
+  三種圖（長條、甜甜圈、折線）自繪約 200 行，並依 <code>devicePixelRatio</code> 放大畫布避免手機上線條糊掉。</p>
+</section>
+
+<section>
+  <h2>3. 測試中發現並修正的缺陷</h2>
+
+  <div class="bug">
+    <h3>缺陷 1：算式解析把減號吃進數字，導致 <code>100-30</code> 完全無法計算</h3>
+    <dl>
+      <dt>發現方式</dt><dd>node 單元測試 <code>evaluateExpression</code> 回傳 <code>null</code></dd>
+      <dt>根因</dt><dd>tokenizer 樣式寫成 <code>/-?\d*\.?\d+|[+\-*/]/g</code>，
+        對 <code>"100-30"</code> 會切成 <code>["100", "-30"]</code> 兩個數字而少掉運算子，
+        後續取運算元時得到 <code>undefined</code></dd>
+      <dt>修正</dt><dd>數字樣式移除前導負號，改在解析開頭單獨處理負號</dd>
+      <dt>影響</dt><dd>高。記帳頁的算式輸入是核心功能，減法完全不能用</dd>
+    </dl>
+  </div>
+
+  <div class="bug">
+    <h3>缺陷 2：圖表完全依賴 <code>requestAnimationFrame</code>，rAF 停滯時永遠畫不出來</h3>
+    <dl>
+      <dt>發現方式</dt><dd>瀏覽器實測時三張圖 <code>paintedPct: 0</code>，
+        且 canvas bitmap 仍是 HTML 預設的 300×170，代表 <code>setupCanvas</code> 從未執行</dd>
+      <dt>根因</dt><dd>實測證實 rAF 在該環境永不觸發（即使 <code>document.hidden === false</code>）。
+        更糟的是 <code>redrawQueued</code> 旗標會卡在 <code>true</code>，把後續每一次重繪請求都吞掉</dd>
+      <dt>修正</dt><dd>rAF 與 <code>setTimeout(120ms)</code> 雙軌排程，先觸發者執行並取消另一個；
+        另加 <code>visibilitychange</code> 監聽，從背景回前景時補畫一次</dd>
+      <dt>影響</dt><dd>高。分頁移到背景、部分 WebView、iOS PWA 從凍結恢復都可能踩到，
+        且一旦踩到就是永久性的空白圖表</dd>
+    </dl>
+    <p class="muted">同樣的缺陷也出現在彈出面板的滑入動畫 —— rAF 不觸發時面板會永遠停在畫面外，
+    使用者按了按鈕卻毫無反應。已改用計時器觸發。</p>
+  </div>
+
+  <div class="bug">
+    <h3>缺陷 3：手動估值的帳戶出現在記帳選單，記上去的錢會憑空消失</h3>
+    <dl>
+      <dt>發現方式</dt><dd>手機尺寸截圖檢查時，發現帳戶列出現「台積電持股」與「房貸」</dd>
+      <dt>根因</dt><dd>記帳頁用了 <code>activeAccounts()</code>，未區分估值方式。
+        而測試已證實手動估值帳戶的餘額固定等於使用者填的數字，
+        記在上面的交易不會改變任何餘額</dd>
+      <dt>修正</dt><dd>新增 <code>postableAccounts()</code> 只回傳自動累算的帳戶，
+        記帳與轉帳（含轉入端）一律改用它；資產頁補上說明文字</dd>
+      <dt>影響</dt><dd>中高。不會造成程式錯誤，但會讓使用者記出一筆對不起來的帳且毫無提示</dd>
+    </dl>
+  </div>
+
+  <div class="bug">
+    <h3>缺陷 4：備份備援路徑的狀態回報不誠實</h3>
+    <dl>
+      <dt>發現方式</dt><dd>實測「複製到剪貼簿」在無使用者手勢時被瀏覽器擋下，正確退回文字備援，
+        但備份狀態列仍停在「尚未備份過」且無法更新</dd>
+      <dt>取捨</dt><dd>自動標記為已備份是錯的 —— 內容只是顯示出來，使用者未必真的存走了，
+        標記成功會讓人誤以為安全。改為在備援面板加一個「我已複製並保存」由使用者自己確認</dd>
+      <dt>順帶修正</dt><dd><code>saveTextFile</code> 原本把「使用者取消分享」與「存檔失敗」都回報為 <code>failed</code>，
+        會在使用者主動取消時跳出錯誤訊息。已拆成 <code>cancelled</code> 與 <code>failed</code></dd>
+    </dl>
+  </div>
+</section>
+
+<section>
+  <h2>4. 測試涵蓋範圍</h2>
+  <div class="grid2">
+    <div>
+      <h3>node 單元測試（38 項）</h3>
+      <p class="muted" style="font-size:13px">執行：<code>node --test tests/lib.test.js</code></p>
+      <ul style="font-size:14px">
+        <li>金額解析：全形數字、千分位、無效輸入回 <code>null</code> 而非 <code>0</code></li>
+        <li>浮點誤差防護：<code>19.99</code>、<code>0.07</code>、<code>1.005</code></li>
+        <li>算式運算：乘法優先、除以零、拒絕任意程式碼</li>
+        <li>日期：本地時區、閏年、不存在日期、跨年月份位移</li>
+        <li>統計：餘額累加、轉帳不計收支、分類百分比合計 100%</li>
+        <li>驗證：金額 ≤ 0、轉給自己、參照不存在的帳戶</li>
+        <li>備份：往返一致性、壞資料逐筆跳過、CSV 逸出與 BOM</li>
+      </ul>
+    </div>
+    <div>
+      <h3>瀏覽器整合測試（39 項）</h3>
+      <p class="muted" style="font-size:13px">開啟 <code>test.html</code>，使用獨立資料庫，不影響正式資料</p>
+      <ul style="font-size:14px">
+        <li>IndexedDB 建立、seed、重複初始化不重複塞入</li>
+        <li>記帳寫入後重新載入仍存在</li>
+        <li>信用卡消費呈現為負債、轉帳同時加減兩端</li>
+        <li>手動估值帳戶不受干擾交易影響</li>
+        <li>封存帳戶不列入淨資產</li>
+        <li>同日快照覆蓋而非累積</li>
+        <li>有交易的帳戶／分類拒絕刪除</li>
+        <li><strong>匯出 → 清空 → 還原後資料完全一致（含淨資產金額）</strong></li>
+        <li>合併匯入不刪除既有資料</li>
+      </ul>
+    </div>
+  </div>
+  <div class="note">
+    測試環境限制：預覽窗格處於隱藏狀態時，指標點擊工具無法運作，
+    互動流程改以 JavaScript 派發同等事件驅動（選分類 → 輸入算式 → 送出 → 驗證明細與月結餘）。
+    圖表則以 <code>getImageData</code> 統計非透明像素比例來確認確實有繪製內容。
+  </div>
+</section>
+
+<section>
+  <h2>5. 實測驗證的使用者流程</h2>
+  <ol>
+    <li>首次開啟 → 顯示引導說明（資料存在哪裡、為何要備份）</li>
+    <li>記帳頁選「飲食」→ 輸入 <code>35+50</code> → 即時顯示 <code>= 85</code> → 送出</li>
+    <li>明細頁出現該筆紀錄，月摘要顯示「支出 85／結餘 -85」<span class="pill ok">通過</span></li>
+    <li>資產頁新增「台積電持股」（選投資 → 自動切換為手動估值）1,500,000</li>
+    <li>資產頁新增「房貸」-6,000,000</li>
+    <li>淨資產正確顯示 <code>-NT$4,500,085</code>，資產與負債自動分組<span class="pill ok">通過</span></li>
+    <li>儲存快照 → 報表頁三張圖正確繪製（bitmap 638×362，符合 dpr 2 的高解析度）<span class="pill ok">通過</span></li>
+    <li>設定頁匯出備份 → 內容含 4 帳戶／16 分類／1 交易／1 快照<span class="pill ok">通過</span></li>
+    <li>確認備份後狀態列由黃色警告轉為「✅ 上次備份：9/1（0 天前）」<span class="pill ok">通過</span></li>
+  </ol>
+  <p>版面實測（375×812 視窗）：記帳頁三段式佈局無重疊，鍵盤與送出鍵完整落在可視範圍內。
+  淺色與深色模式皆已檢視。</p>
+</section>
+
+<section>
+  <h2>6. 已知限制與後續可做的事</h2>
+  <ul>
+    <li><strong>單機無同步</strong>：這是使用者明確選擇的取捨。換手機必須透過匯出／匯入備份檔轉移。</li>
+    <li><strong>備份是唯一救援手段</strong>：App 已在超過 30 天未備份時顯示警告，但無法強制。</li>
+    <li><strong>未做 CSV 匯入</strong>：依使用者決定移除，僅保留 CSV 匯出。</li>
+    <li>可加：預算上限提醒、定期自動記帳（房租、訂閱）、多幣別。</li>
+  </ul>
+</section>
+
+<p class="muted" style="text-align:center; margin-top:36px; font-size:13px">
+  MoneyBook v1.0.0　·　2026-09-01
+</p>
+
+</div>
+</body>
+</html>
