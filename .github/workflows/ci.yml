@@ -31,7 +31,7 @@ jobs:
           node-version: '22'
 
       - name: 單元測試
-        run: node --test tests/lib.test.js
+        run: node --test tests/*.test.js
 
       - name: 檢查 sw.js 的 app shell 清單沒有漏檔
         run: node tools/check_shell.mjs

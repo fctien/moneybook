@@ -55,6 +55,18 @@ export function createEntryView({ onSaved } = {}) {
       maxlength: '200',
       onInput: (e) => { draft.note = e.target.value; },
     });
+    // 掃發票是「一次記完整張」的捷徑，跟下面手動輸入互不干擾，
+    // 所以放在分類上方而不是擠進鍵盤區
+    refs.scanBtn = el('button.btn.btn--scan', {
+      type: 'button',
+      onClick: async () => {
+        // 動態載入：掃描要用到的 QR 解碼元件有 250 KB，
+        // 沒按這顆按鈕的人不該為它付出啟動時間
+        const { startInvoiceScan } = await import('./scan.js');
+        await startInvoiceScan({ onSaved: () => onSaved?.({ wasEditing: false }) });
+      },
+    }, ['📷 掃電子發票']);
+
     refs.keypad = el('div.keypad');
     refs.submit = el('button.btn.btn--primary.btn--submit', { type: 'button', onClick: submit }, ['完成']);
     refs.cancelEdit = el('button.btn.btn--ghost.is-hidden', { type: 'button', onClick: () => resetDraft() }, ['取消編輯']);
@@ -65,6 +77,7 @@ export function createEntryView({ onSaved } = {}) {
         el('div.amount-box', {}, [refs.amount, refs.amountHint]),
       ]),
       el('div.entry-scroll', {}, [
+        refs.scanBtn,
         el('div.field', {}, [el('div.field__label', { text: '分類' }), refs.categoryGrid]),
         el('div.field', {}, [el('div.field__label', { text: '帳戶' }), refs.accountRow, refs.transferRow]),
         el('div.field', {}, [el('div.field__label', { text: '日期' }), refs.dateRow]),

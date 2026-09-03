@@ -854,3 +854,134 @@ button { cursor: pointer; }
 @media (prefers-reduced-motion: reduce) {
   * { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
 }
+
+/* ── 掃電子發票 ───────────────────────────────────────────── */
+
+.btn--scan {
+  width: 100%;
+  margin-bottom: 4px;
+  background: var(--c-accent-soft);
+  color: var(--c-accent);
+  border: 1px dashed var(--c-accent);
+  font-weight: 600;
+}
+
+.scan-busy {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(15, 23, 42, 0.45);
+}
+
+.scan-busy__box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 24px 32px;
+  border-radius: var(--radius);
+  background: var(--c-surface);
+  box-shadow: var(--shadow);
+}
+
+.scan-busy__spinner {
+  width: 28px;
+  height: 28px;
+  border: 3px solid var(--c-border);
+  border-top-color: var(--c-accent);
+  border-radius: 50%;
+  animation: scan-spin 0.8s linear infinite;
+}
+
+@keyframes scan-spin { to { transform: rotate(360deg); } }
+
+/* 使用者若關閉動畫偏好，就別轉，改用靜態圓圈 */
+@media (prefers-reduced-motion: reduce) {
+  .scan-busy__spinner { animation: none; }
+}
+
+.scan-busy__text { font-size: 14px; color: var(--c-text-muted); }
+
+.invoice-summary {
+  padding: 12px 0 16px;
+  text-align: center;
+  border-bottom: 1px solid var(--c-border);
+  margin-bottom: 12px;
+}
+
+.invoice-summary__amount {
+  font-size: 30px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.invoice-summary__meta {
+  margin-top: 4px;
+  font-size: 13px;
+  color: var(--c-text-muted);
+}
+
+.invoice-items { margin: 12px 0; }
+
+.invoice-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 2px;
+  border-bottom: 1px solid var(--c-border);
+}
+
+.invoice-item input[type="checkbox"] {
+  width: 20px;
+  height: 20px;
+  flex: none;
+  accent-color: var(--c-accent);
+}
+
+.invoice-item__main { flex: 1; min-width: 0; }
+
+.invoice-item__name {
+  font-size: 15px;
+  /* 品名可能很長，截斷比換行更好讀 */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.invoice-item__detail { font-size: 12px; color: var(--c-text-muted); }
+
+.invoice-item__cat {
+  flex: none;
+  max-width: 108px;
+  padding: 6px 8px;
+  font-size: 13px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-sm);
+  background: var(--c-surface-2);
+  color: var(--c-text);
+}
+
+.invoice-item__amount {
+  flex: none;
+  min-width: 68px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.invoice-total {
+  padding: 12px 2px 4px;
+  font-size: 14px;
+  text-align: right;
+}
+
+.invoice-total__diff { color: var(--c-warning); }
+
+.hint--warn {
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--c-warning-bg);
+  color: var(--c-warning);
+}

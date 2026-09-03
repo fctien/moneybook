@@ -63,7 +63,7 @@
 <header>
   <h1>MoneyBook 開發紀錄 &mdash; 2026-09-03</h1>
   <div class="meta">
-    本次主題：<strong>既有版本功能驗證</strong> + <strong>加入 GitHub 自動部署與更新管理</strong><br>
+    本次主題：<strong>既有版本功能驗證</strong> · <strong>GitHub 自動部署</strong> · <strong>新增掃電子發票（v1.1.0）</strong><br>
     起始 commit <code>921d35b</code>（工作區乾淨）&nbsp;·&nbsp;
     Node <code>v22.15.0</code>&nbsp;·&nbsp; Python <code>3.11.7</code>&nbsp;·&nbsp;
     本機伺服器 <code>http://localhost:8811</code>
@@ -362,8 +362,123 @@ Service Worker 的 fetch 走 stale-while-revalidate &mdash; 開啟時先用快�
 </section>
 
 <section>
-<h2>6. 待辦</h2>
+<h2>6. 新功能：掃電子發票（v1.1.0）</h2>
+
+<h3>6.1 為什麼不做 OCR</h3>
+<p>
+使用者原本的需求是「拍收據 → OCR 辨識品項」。查證後認定 OCR 是繞遠路：
+</p>
 <ul>
+  <li><strong>Tesseract.js 中文品質不佳</strong>，熱感應紙的小字、褪色、緊密行距只會更糟</li>
+  <li><strong>語言檔約 20 MB</strong>，全部塞進離線快取，App 體積會膨脹十倍以上</li>
+  <li><strong>品質好的雲端 OCR 都要把照片送上伺服器</strong>，直接牴觸「資料不離開裝置」的原則</li>
+</ul>
+<p>
+關鍵發現：台灣的電子發票證明聯底部有兩個 QR Code，
+<strong>品名、數量、單價本來就以數位形式編碼在右方條碼裡</strong>。
+直接解碼是精確值，沒有辨識誤差，而且完全在本機完成。
+</p>
+
+<h3>6.2 規格來源</h3>
+<p>
+依財政部財政資訊中心「電子發票證明聯一維及二維條碼規格說明」v1.9 實作。
+左方前 77 碼為固定欄位，其後以冒號分隔：
+</p>
+<pre><code>發票字軌(10) 開立日期(7) 隨機碼(4) 銷售額(8,hex) 總計額(8,hex)
+買方統編(8) 賣方統編(8) 加密驗證(24)                     ← 合計 77 碼
+: 營業人自行使用區(10) : 條碼記載品目筆數 : 發票品目總筆數
+: 中文編碼參數(0=Big5 1=UTF-8 2=Base64) : 品名 : 數量 : 單價 : …
+
+右方：前 2 碼固定 "**"，其後接續左方放不下的品目資訊</code></pre>
+
+<h3>6.3 為什麼用拍照而不是即時相機</h3>
+<div class="note">
+iOS 上安裝成主畫面 App 後，<code>getUserMedia</code> 的權限不會被記住、會反覆跳授權，
+iOS 26 還有畫面轉 90 度的問題。改用 <code>&lt;input type="file" capture="environment"&gt;</code>
+叫出系統相機拍一張<strong>靜態照片</strong>再從照片解碼，完全避開這些坑，也不需要任何權限提示。
+桌機瀏覽器會自動退化成選檔案，同一套程式碼兩邊都能用。
+</div>
+<p>
+一張發票有<strong>兩個</strong> QR，而 jsQR 一次只回傳一個。
+解法是找到第一個後，用它回傳的 <code>location</code> 把該區域塗白再掃一次。
+另外由 1280 → 1920 → 2560 逐步提高解析度重試 —— 太低掃不到小條碼，太高在手機上慢得離譜。
+</p>
+
+<h3>6.4 測試抓到的兩個真缺陷</h3>
+
+<div class="bug">
+<h3>缺陷一：Base64 編碼時，數量與單價也被拿去解碼</h3>
+<dl>
+  <dt>發現於</dt><dd>Node 單元測試（第一次執行就 24/25，這題掛掉）</dd>
+  <dt>原因</dt><dd>規格中的「中文編碼參數」<strong>只作用在品名</strong>，數量與單價是十進位明碼。
+      我對每個欄位都做了 Base64 解碼，而 <code>'35'</code> 剛好是合法的 Base64，被解成亂碼</dd>
+  <dt>修正</dt><dd>把解碼移進 <code>readItems</code>，只對品名欄位解碼</dd>
+</dl>
+</div>
+
+<div class="bug">
+<h3>缺陷二：UTF-8 品名以位元組傳入時變成亂碼</h3>
+<dl>
+  <dt>發現於</dt><dd>瀏覽器端實測，畫面上顯示「é®®å¥¶è¶」而不是「鮮奶茶」</dd>
+  <dt>為什麼單元測試沒抓到</dt><dd>Node 測試那時傳的是<strong>字串</strong>，而 jsQR 實際回傳的是
+      <code>binaryData</code> <strong>位元組</strong> —— 兩者走的是不同分支</dd>
+  <dt>原因</dt><dd>為了讓位元組與字元位置一對一對齊，內部是用 latin1 逐位元組轉字元。
+      那份文字對 ASCII 正確、對中文則是亂碼。<code>decodeSegment</code> 只在 Big5 時走 TextDecoder，
+      UTF-8 直接回傳了那份 latin1 文字</dd>
+  <dt>修正</dt><dd>只要拿得到原始位元組就一律走 TextDecoder，不論 Big5 或 UTF-8</dd>
+  <dt>補強</dt><dd>加了 2 項迴歸測試，專門覆蓋「以位元組傳入」的實際形態，含跨左右條碼接續的多位元組字元</dd>
+</dl>
+</div>
+
+<div class="note">
+過程中還有一次假警報：修好缺陷二後重新整理，畫面仍是亂碼。
+原因是 <strong>Service Worker 的 cache-first 提供了舊版程式碼</strong> ——
+開發伺服器雖然送 <code>Cache-Control: no-store</code>，但 SW 的快取在它之前就攔截了。
+清掉快取與註冊後即正常。這也再次印證了 <code>CACHE_VERSION</code> 的必要性。
+</div>
+
+<h3>6.5 驗證結果</h3>
+<table>
+<tr><th>項目</th><th>結果</th></tr>
+<tr><td>Node 單元測試</td><td><span class="pill ok">65 / 65</span>（原 38 + 發票 27）</td></tr>
+<tr><td>APP_SHELL 檢查</td><td><span class="pill ok">26 項，涵蓋 20 支程式碼檔案</span></td></tr>
+<tr><td>雙 QR 偵測（遮罩重掃）</td><td><span class="pill ok">jsQR 被呼叫 2 次，兩個條碼都取到</span></td></tr>
+<tr><td>品名中文顯示</td><td><span class="pill ok">鮮奶茶／排骨便當</span></td></tr>
+<tr><td>金額與日期帶入</td><td><span class="pill ok">2026-09-03，NT$35 / NT$80</span></td></tr>
+<tr><td>總額不符提示</td><td><span class="pill ok">已選 115，提示與發票總額 500 不符</span></td></tr>
+<tr><td>實際寫入資料庫</td><td><span class="pill ok">2 筆，金額 3500 / 8000 分</span></td></tr>
+<tr><td>重複發票偵測</td><td><span class="pill ok">再掃同一張會跳確認</span></td></tr>
+</table>
+<p class="muted">
+自動化測試以注入假 <code>jsQR</code> 與固定圖片的方式驅動整條流程
+（<code>startInvoiceScan</code> 接受可注入的 <code>pickPhoto</code>，否則檔案選取對話框會讓測試卡死）。
+<strong>jsQR 本身的辨識品質未在此驗證</strong>，需以實體發票確認。
+</p>
+
+<h3>6.6 新增與變更</h3>
+<table>
+<tr><th>檔案</th><th>內容</th></tr>
+<tr><td><code>js/lib/invoice.js</code></td><td>財政部發票條碼解析（純函式）</td></tr>
+<tr><td><code>js/lib/qrscan.js</code></td><td>照片 → QR 解碼、雙條碼遮罩重掃、相機叫用</td></tr>
+<tr><td><code>js/lib/jsqr.js</code></td><td>第三方解碼器，251 KB，Apache-2.0，經使用者同意後下載</td></tr>
+<tr><td><code>js/views/scan.js</code></td><td>確認畫面：逐項／總額兩種模式、逐列指定分類</td></tr>
+<tr><td><code>tests/invoice.test.js</code></td><td>27 項測試</td></tr>
+<tr><td><code>js/views/entry.js</code></td><td>加入「📷 掃電子發票」按鈕（動態 import，不影響啟動）</td></tr>
+<tr><td><code>package.json</code></td><td><code>node --test tests/</code> 在 Windows 會失敗，改為 <code>tests/*.test.js</code></td></tr>
+<tr><td>版本</td><td>1.0.0 → <strong>1.1.0</strong>（<code>CACHE_VERSION</code>、<code>APP_VERSION</code> 同步）</td></tr>
+</table>
+
+<div class="note">
+<strong>安全查核：</strong>下載 jsQR 後確認為合法 JS、正確註冊全域函式，
+並以 grep 檢查<strong>沒有任何連外行為</strong>（無 <code>fetch</code>／<code>XMLHttpRequest</code>／
+<code>WebSocket</code>／<code>sendBeacon</code>／動態 <code>import</code>）。照片不會離開裝置。
+</div>
+</section>
+
+<section>
+<h2>7. 待辦</h2>
+<ul>
+  <li><strong>用實體發票實測掃描</strong> &mdash; jsQR 對真實熱感應紙上 QR 的辨識率是本功能唯一未驗證的環節</li>
   <li>使用者用 iPhone Safari 開啟 <code>https://fctien.github.io/moneybook/</code> &rarr; 分享 &rarr; 加入主畫面，實測安裝與離線開啟</li>
   <li>安裝後立即做一次「設定 &rarr; 匯出備份檔」</li>
   <li>CI log 出現 Node.js 20 deprecation 警告（GitHub runner 端），目前僅為警告、不影響執行</li>
