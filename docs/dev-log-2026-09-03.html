@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>MoneyBook 開發紀錄 2026-09-02</title>
+<title>MoneyBook 開發紀錄 2026-09-03</title>
 <style>
   :root {
     --bg: #f6f7f9; --surface: #fff; --border: #e3e6ea; --text: #1a1d21;
@@ -61,7 +61,7 @@
 <div class="wrap">
 
 <header>
-  <h1>MoneyBook 開發紀錄 &mdash; 2026-09-02</h1>
+  <h1>MoneyBook 開發紀錄 &mdash; 2026-09-03</h1>
   <div class="meta">
     本次主題：<strong>既有版本功能驗證</strong> + <strong>加入 GitHub 自動部署與更新管理</strong><br>
     起始 commit <code>921d35b</code>（工作區乾淨）&nbsp;·&nbsp;
@@ -301,17 +301,77 @@ Service Worker 採 cache-first，若版本字串沒變，已安裝在手機上�
 </section>
 
 <section>
-<h2>5. 待辦</h2>
+<h2>5. 部署到 GitHub Pages</h2>
+
+<h3>5.1 過程</h3>
+<ol>
+  <li>設定 remote <code>https://github.com/fctien/moneybook.git</code>，分支由 <code>master</code> 改名 <code>main</code></li>
+  <li>使用者自行在 GitHub 建立 public repo，推送 3 筆 commit、35 個檔案</li>
+  <li>首次 <code>Deploy to GitHub Pages</code> workflow <strong>失敗</strong>：
+      <code>test</code> job 通過（7 秒），<code>deploy</code> job 失敗（6 秒），
+      錯誤為 <code>HttpError: Not Found</code> &mdash;
+      <em>Get Pages site failed. Please verify that the repository has Pages enabled.</em>
+      原因是 repo 尚未啟用 Pages</li>
+  <li>使用者在 Settings &rarr; Pages 找不到 <code>GitHub Actions</code> 選項，
+      改採備案：<strong>Deploy from a branch</strong>（<code>main</code> / <code>root</code>）</li>
+  <li>站台隨即上線：<strong>https://fctien.github.io/moneybook/</strong></li>
+</ol>
+
+<h3>5.2 因應分支部署調整 CI</h3>
+<p>
+選擇 Deploy from a branch 後，GitHub 會在每次推送後自行發佈 repo 根目錄，
+原本使用 <code>actions/deploy-pages</code> 的 <code>deploy</code> job 與這個模式互斥、會固定失敗，因此移除。
+</p>
+<table>
+<tr><th>變更</th><th>內容</th></tr>
+<tr><td>刪除 <code>.github/workflows/deploy.yml</code></td><td>與分支部署衝突</td></tr>
+<tr><td>新增 <code>.github/workflows/ci.yml</code></td><td>純品質關卡：單元測試 + APP_SHELL 檢查</td></tr>
+<tr><td>新增 <code>tools/check_shell.mjs</code></td><td>雙向比對 <code>sw.js</code> 的 APP_SHELL 與實際檔案</td></tr>
+<tr><td>新增 <code>tools/bump_version.py</code></td><td>需要強制立即更新時，用 commit SHA 戳 <code>CACHE_VERSION</code></td></tr>
+<tr><td>移除 <code>tools/__pycache__</code></td><td>先前被誤加進版控，並補進 <code>.gitignore</code></td></tr>
+</table>
+
+<div class="note">
+<strong>為什麼要有 <code>check_shell.mjs</code>：</strong>
+新增一支 view 或 lib 檔卻忘了加進 <code>APP_SHELL</code>，在有網路時完全看不出問題
+（<code>fetch</code> 直接抓得到），但使用者一進飛航模式那支檔案就載不到，App 整個開不起來。
+這種缺陷很難靠手動測試發現，交給 CI 擋。
+已用反向測試驗證：新增未列入的檔案、以及列入不存在的檔案，兩種情況都正確回傳 exit 1。
+</div>
+
+<div class="note">
+<strong>關於自動更新：</strong>
+Service Worker 的 fetch 走 stale-while-revalidate &mdash; 開啟時先用快取立刻顯示，
+同時在背景重抓更新快取，因此推上 <code>main</code> 後使用者<strong>下一次</strong>開啟就是新版，
+平常不需要跑 <code>bump_version.py</code>。
+只有想讓「這一次」就跳出更新提示（瀏覽器需偵測到 <code>sw.js</code> 位元組變動），
+或需要整包重建快取時才需要。不論哪種，清掉的都只是程式碼快取，IndexedDB 的帳目不受影響。
+</div>
+
+<h3>5.3 線上站台驗證</h3>
+<table>
+<tr><th>檢查項目</th><th>結果</th></tr>
+<tr><td>首頁與所有靜態檔</td><td><span class="pill ok">HTTP 200</span>（含 <code>.webmanifest</code> MIME 正確）</td></tr>
+<tr><td>Service Worker</td><td><span class="pill ok">activated</span>，scope <code>/moneybook/</code></td></tr>
+<tr><td>頁面受 SW 控制</td><td><span class="pill ok">yes</span></td></tr>
+<tr><td>離線快取</td><td><span class="pill ok">22 檔</span></td></tr>
+<tr><td>manifest 與圖示</td><td><span class="pill ok">名稱正確、3 個圖示</span></td></tr>
+<tr><td>CI（調整後）</td><td><span class="pill ok">成功，8 秒</span></td></tr>
+<tr><td>pages-build-deployment</td><td><span class="pill ok">成功，26 秒</span></td></tr>
+</table>
+</section>
+
+<section>
+<h2>6. 待辦</h2>
 <ul>
-  <li><strong>建立 GitHub repo 並設定 remote</strong> &mdash; 需使用者授權，本次未執行</li>
-  <li>repo 建立後到 Settings &rarr; Pages &rarr; Source 選 <strong>GitHub Actions</strong>（不是 Deploy from a branch）</li>
-  <li>首次部署後用手機 Safari／Chrome 開啟網址，驗證「加到主畫面」與離線開啟</li>
-  <li>本機環境未安裝 <code>gh</code> CLI，若要用指令建 repo 需先安裝</li>
+  <li>使用者用 iPhone Safari 開啟 <code>https://fctien.github.io/moneybook/</code> &rarr; 分享 &rarr; 加入主畫面，實測安裝與離線開啟</li>
+  <li>安裝後立即做一次「設定 &rarr; 匯出備份檔」</li>
+  <li>CI log 出現 Node.js 20 deprecation 警告（GitHub runner 端），目前僅為警告、不影響執行</li>
 </ul>
 </section>
 
 <footer class="meta" style="margin-top:32px;padding-top:14px;border-top:1px solid var(--border)">
-  MoneyBook 開發紀錄 &mdash; 2026-09-02
+  MoneyBook 開發紀錄 &mdash; 2026-09-03
 </footer>
 
 </div>
