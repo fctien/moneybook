@@ -60,6 +60,66 @@ export async function startInvoiceScan({ onSaved, pickPhoto = capturePhoto } = {
   openConfirmSheet(parsed.value, onSaved);
 }
 
+/**
+ * 掃發票的使用說明。
+ *
+ * 刻意把「哪些發票不適用」寫在說明裡而不是等失敗才跳錯誤 ——
+ * 使用者對著一張手開收據拍三次都掃不到，只會覺得功能壞了。
+ */
+export function openScanHelp() {
+  openSheet('怎麼掃電子發票', (body) => {
+    body.append(
+      el('p.sheet__message', {
+        text: '電子發票證明聯的下方印有兩個方塊狀的條碼，品名、數量、單價本來就記在裡面。App 直接讀取，不需要辨識文字，也不會把照片傳出去。',
+      }),
+
+      el('div.help-block', {}, [
+        el('div.help-block__title', { text: '操作步驟' }),
+        el('ol.guide-list', {}, [
+          el('li', { text: '按上方「📷 掃電子發票」，手機會叫出相機。' }),
+          el('li', { text: '對準發票「最下方」，讓兩個方塊條碼都完整入鏡再拍。' }),
+          el('li', { text: '解出品項後，勾選要記的項目，並幫每一項選分類。' }),
+          el('li', { text: '按「記錄」，每個勾選的品項各存成一筆。' }),
+        ]),
+      ]),
+
+      el('div.help-block', {}, [
+        el('div.help-block__title', { text: '拍不到時試試' }),
+        el('ul.guide-list', {}, [
+          el('li', { text: '把發票攤平，不要有摺痕壓在條碼上。' }),
+          el('li', { text: '光線要足，但避免正上方反光。' }),
+          el('li', { text: '鏡頭再靠近一點，讓兩個條碼佔滿畫面寬度。' }),
+          el('li', { text: '左右拍反了沒關係，App 會自動判斷。' }),
+        ]),
+      ]),
+
+      el('div.help-block', {}, [
+        el('div.help-block__title', { text: '兩種記法' }),
+        el('ul.guide-list', {}, [
+          el('li', { text: '逐項記帳：每個品項各記一筆，可分別指定分類。一張發票裡混著食材和日用品時用這個。' }),
+          el('li', { text: '記成一筆：只記總金額，品名寫進備註。懶得分類時用這個。' }),
+        ]),
+      ]),
+
+      el('div.help-block', {}, [
+        el('div.help-block__title', { text: '這些情況掃不出品項' }),
+        el('ul.guide-list', {}, [
+          el('li', { text: '傳統手開發票、一般收據、國外消費 —— 上面沒有這種條碼。' }),
+          el('li', { text: '品項太多時，超出的明細只存在財政部平台，發票本身沒有記載。' }),
+          el('li', { text: '有些店家的品名是內部代碼或只寫「商品」，這是店家端的問題。' }),
+        ]),
+        el('p.hint', {
+          text: '就算解不出品項也不算白掃 —— 日期與總金額一定讀得到，會自動帶入，您只要選分類。',
+        }),
+      ]),
+
+      el('p.hint.hint--block', {
+        text: '照片只在手機裡運算，用完即丟，不會儲存也不會上傳。同一張發票掃第二次會跳出提醒。',
+      }),
+    );
+  });
+}
+
 /** 掃描期間的簡單遮罩，避免使用者以為當掉了 */
 function showBusy() {
   const node = el('div.scan-busy', {}, [

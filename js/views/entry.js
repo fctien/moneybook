@@ -67,6 +67,20 @@ export function createEntryView({ onSaved } = {}) {
       },
     }, ['📷 掃電子發票']);
 
+    // 光有一顆按鈕，使用者不會知道該拍發票的哪個部位、也不知道哪些發票不適用。
+    // 一行提示講清楚最常見的用法，細節與限制收進「怎麼用」。
+    refs.scanHelp = el('div.scan-hint', {}, [
+      el('span', { text: '拍發票下方兩個方塊，自動帶出品項與金額' }),
+      el('button.link-btn', {
+        type: 'button',
+        onClick: async () => {
+          // scan.js 只有 10 KB，且不會連帶載入 jsQR（那是按下掃描才載入的）
+          const { openScanHelp } = await import('./scan.js');
+          openScanHelp();
+        },
+      }, ['怎麼用？']),
+    ]);
+
     refs.keypad = el('div.keypad');
     refs.submit = el('button.btn.btn--primary.btn--submit', { type: 'button', onClick: submit }, ['完成']);
     refs.cancelEdit = el('button.btn.btn--ghost.is-hidden', { type: 'button', onClick: () => resetDraft() }, ['取消編輯']);
@@ -78,6 +92,7 @@ export function createEntryView({ onSaved } = {}) {
       ]),
       el('div.entry-scroll', {}, [
         refs.scanBtn,
+        refs.scanHelp,
         el('div.field', {}, [el('div.field__label', { text: '分類' }), refs.categoryGrid]),
         el('div.field', {}, [el('div.field__label', { text: '帳戶' }), refs.accountRow, refs.transferRow]),
         el('div.field', {}, [el('div.field__label', { text: '日期' }), refs.dateRow]),

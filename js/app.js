@@ -10,7 +10,7 @@ import { createAssetsView } from './views/assets.js';
 import { createReportView } from './views/report.js';
 import { createSettingsView } from './views/settings.js';
 
-export const APP_VERSION = '1.1.0';
+export const APP_VERSION = '1.1.1';
 
 const TABS = [
   { id: 'entry', label: '記帳', icon: '✏️' },
@@ -143,6 +143,7 @@ async function maybeShowFirstRunGuide() {
       el('p.sheet__message', { text: '這是一個完全離線的記帳工具，所有資料只存在這台裝置裡，不會上傳到任何伺服器。' }),
       el('ul.guide-list', {}, [
         el('li', { text: '「記帳」頁用數字鍵盤快速記錄收支，可以直接打 35+50 這種算式。' }),
+        el('li', { text: '按「📷 掃電子發票」拍發票下方的兩個方塊條碼，品項與金額會自動帶入。' }),
         el('li', { text: '「資產」頁可手動填入股票、不動產、貸款的價值，算出淨資產。' }),
         el('li', { text: '請把本頁「加到主畫面」，否則 iOS 可能在閒置七天後清掉資料。' }),
         el('li', { text: '每個月到「設定」匯出一次備份檔，這是資料遺失時唯一的救援方式。' }),

@@ -455,6 +455,30 @@ iOS 26 還有畫面轉 90 度的問題。改用 <code>&lt;input type="file" capt
 <strong>jsQR 本身的辨識品質未在此驗證</strong>，需以實體發票確認。
 </p>
 
+<h3>6.7 首頁使用說明（v1.1.1）</h3>
+<p>
+只放一顆按鈕，使用者不會知道要拍發票的哪個部位，也不會知道手開收據根本沒有條碼 &mdash;
+對著不適用的收據連拍三次都失敗，只會認為功能壞了。因此補上三處說明：
+</p>
+<table>
+<tr><th>位置</th><th>內容</th></tr>
+<tr><td>按鈕下方一行提示</td><td>「拍發票下方兩個方塊，自動帶出品項與金額」＋「怎麼用？」連結</td></tr>
+<tr><td>「怎麼用？」說明頁</td><td>操作步驟、拍不到時的排除方法、兩種記法的差異、<strong>哪些發票不適用</strong>、隱私說明</td></tr>
+<tr><td>首次啟動導覽</td><td>新增一條介紹掃發票</td></tr>
+</table>
+<p class="muted">
+說明頁放在 <code>scan.js</code> 裡以動態 <code>import</code> 載入。
+該模組只有 10 KB，且<strong>不會連帶載入 jsQR</strong> &mdash;
+那 251 KB 是在 <code>qrscan.js</code> 內部按下掃描時才注入 script 標籤載入的。
+</p>
+<table>
+<tr><th>驗證</th><th>結果</th></tr>
+<tr><td>提示列與連結</td><td><span class="pill ok">正常顯示</span></td></tr>
+<tr><td>說明頁</td><td><span class="pill ok">4 個段落、13 條說明</span></td></tr>
+<tr><td>手機寬度 375px</td><td><span class="pill ok">單行 22px，無水平溢出</span></td></tr>
+<tr><td>單元測試</td><td><span class="pill ok">65 / 65</span></td></tr>
+</table>
+
 <h3>6.6 新增與變更</h3>
 <table>
 <tr><th>檔案</th><th>內容</th></tr>
