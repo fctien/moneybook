@@ -15,6 +15,7 @@ import { todayISO, daysBetween, formatDayLabel } from '../lib/dateutil.js';
 import { formatAmount } from '../lib/money.js';
 import * as store from '../store.js';
 import { storageEstimate, requestPersistence } from '../db.js';
+import { isStandalone, installGuide } from '../lib/install.js';
 
 const LAST_BACKUP_KEY = 'lastBackupAt';
 const BACKUP_WARN_DAYS = 30;
@@ -43,6 +44,7 @@ export function createSettingsView({ appVersion = '1.0.0' } = {}) {
       ]),
       refs.dataCard,
       refs.storageCard,
+      buildInstallCard(),
       el('section.card', {}, [
         el('h2.card__title', { text: '關於' }),
         el('p.about-text', { text: `MoneyBook v${appVersion}` }),
@@ -53,6 +55,56 @@ export function createSettingsView({ appVersion = '1.0.0' } = {}) {
     );
 
     refresh();
+  }
+
+  /**
+   * 「加到主畫面」。
+   *
+   * 已經安裝的人不需要被一直提醒，所以只有在「還沒安裝」時才顯示警告。
+   * 這條不是體驗建議而是資料安全問題：iOS Safari 會清除七天未使用的一般網站資料，
+   * 已加到主畫面的 PWA 才不受此限制。
+   */
+  function buildInstallCard() {
+    const installed = isStandalone();
+
+    return el('section.card', {}, [
+      el('h2.card__title', { text: '加到主畫面' }),
+      installed
+        ? el('p.about-text.about-text--muted', { text: '✅ 已經以獨立 App 的形式開啟，資料不會被瀏覽器當成一般網站清掉。' })
+        : el('p.hint.hint--warn', {
+          text: 'iOS Safari 會清除七天未使用的網站資料。加到主畫面後就不受這個限制，強烈建議現在就做。',
+        }),
+      el('div.row-list', {}, [
+        rowButton('📲', installed ? '安裝方式說明' : '如何加到主畫面', openInstallHelp),
+      ]),
+    ]);
+  }
+
+  function openInstallHelp() {
+    const guide = installGuide();
+
+    openSheet('加到主畫面', (body) => {
+      body.append(
+        el('p.sheet__message', {
+          text: '加到主畫面之後，從圖示開啟就是全螢幕、沒有網址列，跟一般 App 一樣，而且瀏覽器不會把資料當成一般網站清掉。',
+        }),
+        el('div.help-block', {}, [
+          el('div.help-block__title', { text: guide.title }),
+          el('ol.guide-list', {}, guide.steps.map((s) => el('li', { text: s }))),
+        ]),
+      );
+
+      if (guide.warnings.length) {
+        body.append(el('div.help-block', {}, [
+          el('div.help-block__title', { text: '找不到選項時' }),
+          el('ul.guide-list', {}, guide.warnings.map((w) => el('li', { text: w }))),
+        ]));
+      }
+
+      body.append(el('p.hint.hint--block', {
+        text: '安裝後請立刻做一次「匯出備份檔」。加到主畫面降低了資料被清掉的機率，但手機遺失或重置一樣救不回來。',
+      }));
+    });
   }
 
   function rowButton(icon, label, onClick, { danger = false, meta = '' } = {}) {
