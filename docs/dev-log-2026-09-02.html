@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MoneyBook 開發紀錄 2026-09-02</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --surface: #fff; --border: #e3e6ea; --text: #1a1d21;
+    --muted: #656d76; --accent: #2563eb; --ok: #16a34a; --bad: #dc2626;
+    --warn: #b45309; --warn-bg: #fef3c7; --code-bg: #f1f3f5;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1115; --surface: #171a1f; --border: #2b3038; --text: #e6e8eb;
+      --muted: #9aa4b0; --accent: #60a5fa; --ok: #4ade80; --bad: #f87171;
+      --warn: #fbbf24; --warn-bg: #3a2a06; --code-bg: #1e2229;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 32px 20px 64px; background: var(--bg); color: var(--text);
+    font-family: system-ui, -apple-system, "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", sans-serif;
+    line-height: 1.7; font-size: 15px;
+  }
+  .wrap { max-width: 880px; margin: 0 auto; }
+  header { border-bottom: 2px solid var(--accent); padding-bottom: 16px; margin-bottom: 28px; }
+  h1 { font-size: 25px; margin: 0 0 6px; }
+  .meta { color: var(--muted); font-size: 13px; }
+  .meta code { background: var(--code-bg); padding: 2px 6px; border-radius: 4px; font-size: 12px; }
+  h2 {
+    font-size: 18px; margin: 36px 0 12px; padding-left: 11px;
+    border-left: 4px solid var(--accent);
+  }
+  h3 { font-size: 15px; margin: 22px 0 8px; }
+  section { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 18px 22px; margin-bottom: 18px; }
+  table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 14px; }
+  th, td { border: 1px solid var(--border); padding: 8px 11px; text-align: left; vertical-align: top; }
+  th { background: var(--code-bg); font-weight: 600; }
+  code { background: var(--code-bg); padding: 2px 5px; border-radius: 4px; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 13px; }
+  pre { background: var(--code-bg); padding: 12px 14px; border-radius: 8px; overflow-x: auto; font-size: 13px; line-height: 1.5; }
+  pre code { background: none; padding: 0; }
+  ul, ol { padding-left: 22px; }
+  li { margin: 5px 0; }
+  .pill { display: inline-block; border-radius: 999px; padding: 2px 11px; font-size: 12px; font-weight: 600; }
+  .pill.ok { background: rgba(22,163,74,.14); color: var(--ok); }
+  .pill.bad { background: rgba(220,38,38,.14); color: var(--bad); }
+  .bug { border-left: 4px solid var(--bad); padding-left: 14px; margin: 18px 0; }
+  .bug h3 { margin-top: 0; }
+  .bug dl { margin: 8px 0 0; display: grid; grid-template-columns: max-content 1fr; gap: 5px 14px; font-size: 14px; }
+  .bug dt { color: var(--muted); }
+  .bug dd { margin: 0; }
+  .note {
+    background: var(--warn-bg); color: var(--warn); border-radius: 8px;
+    padding: 11px 14px; font-size: 14px; margin: 14px 0;
+  }
+  .muted { color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>MoneyBook 開發紀錄 &mdash; 2026-09-02</h1>
+  <div class="meta">
+    本次主題：<strong>既有版本功能驗證</strong> + <strong>加入 GitHub 自動部署與更新管理</strong><br>
+    起始 commit <code>921d35b</code>（工作區乾淨）&nbsp;·&nbsp;
+    Node <code>v22.15.0</code>&nbsp;·&nbsp; Python <code>3.11.7</code>&nbsp;·&nbsp;
+    本機伺服器 <code>http://localhost:8811</code>
+  </div>
+</header>
+
+<section>
+<h2>0. 本次緣由</h2>
+<p>
+使用者提出 9 項需求（PWA 優先、流水帳記錄、月結、易用介面、架構說明、HTML log、
+自動測試、資料只存本機、預留總資產、GitHub 自動更新）。
+盤點工作目錄後發現 <code>MoneyBook/</code> 已於 2026-09-01 建置完成，
+且第 1&ndash;8 項需求皆已涵蓋，唯獨第 9 項（GitHub）尚未建立。
+</p>
+<p>
+因此本次不重建，改為：<strong>先完整驗證既有版本是否真的能跑</strong>，
+再補上缺少的 GitHub 自動部署。
+</p>
+</section>
+
+<section>
+<h2>1. 架構總覽</h2>
+
+<h3>1.1 技術選型</h3>
+<table>
+<tr><th>層次</th><th>採用</th><th>理由</th></tr>
+<tr><td>形式</td><td>PWA（純靜態）</td><td>iOS／Android／PC 一份程式碼；免上架費、免審核、免 Mac</td></tr>
+<tr><td>前端</td><td>原生 HTML / CSS / ES Modules</td><td>無 npm、無打包、無 CDN；離線時不會因取不到外部資源而白畫面</td></tr>
+<tr><td>資料庫</td><td>IndexedDB</td><td>容量遠大於 localStorage、支援索引查詢，適合逐年累積的交易紀錄</td></tr>
+<tr><td>圖表</td><td>自寫 Canvas</td><td>不引入 Chart.js，避免任何 CDN 相依</td></tr>
+<tr><td>離線</td><td>Service Worker（cache-first）</td><td>飛航模式下仍可開啟與記帳</td></tr>
+<tr><td>測試</td><td><code>node --test</code> + 瀏覽器測試頁</td><td>純函式走 Node，IndexedDB 行為走真實瀏覽器</td></tr>
+<tr><td>後端</td><td><strong>無</strong></td><td>需求第 7 點：資料不得離開裝置</td></tr>
+</table>
+
+<h3>1.2 資料庫結構（IndexedDB：<code>moneybook</code>）</h3>
+<table>
+<tr><th>Object Store</th><th>用途</th><th>關鍵欄位</th></tr>
+<tr><td><code>transactions</code></td><td>收支流水帳</td><td>id, date, type(expense/income/transfer), amount, accountId, toAccountId, categoryId, note</td></tr>
+<tr><td><code>accounts</code></td><td>帳戶與資產項目</td><td>id, name, kind, valuation(auto/manual), openingBalance, archived</td></tr>
+<tr><td><code>categories</code></td><td>收支分類</td><td>id, name, icon, type, order, archived</td></tr>
+<tr><td><code>snapshots</code></td><td>淨資產每日快照</td><td>date, netWorth</td></tr>
+<tr><td><code>meta</code></td><td>設定與備份時間戳</td><td>key, value</td></tr>
+</table>
+<div class="note">
+金額一律以「分」為單位的<strong>整數</strong>儲存，解析走純字串路徑，
+不做 <code>value * 100</code> 的浮點乘法 &mdash; 否則 <code>19.995 * 100</code> 會得到
+<code>1999.4999999999998</code>，誤差會日積月累到帳目對不起來。
+</div>
+
+<h3>1.3 檔案職責</h3>
+<pre><code>index.html              進入點
+manifest.webmanifest    PWA 設定（加到主畫面、全螢幕）
+sw.js                   Service Worker：離線快取 + 版本汰換
+css/app.css             樣式（深色模式、iOS 安全區）
+js/
+  app.js                分頁切換、SW 註冊與更新通知
+  store.js              應用狀態（記憶體 + IndexedDB 同步）
+  db.js                 IndexedDB 封裝
+  ui.js                 共用元件、跨平台檔案輸出
+  chart.js              Canvas 圖表
+  lib/                  純函式層（可被 node --test 直接測試）
+    money.js            金額解析與格式化
+    dateutil.js         本地時區日期處理
+    stats.js            餘額、淨資產、月份與分類彙總
+    schema.js           資料結構與驗證
+    backup.js           備份序列化、CSV 產生
+  views/                entry / ledger / assets / report / settings 五個分頁
+tests/lib.test.js       Node 單元測試
+test.html               瀏覽器整合測試（獨立測試資料庫）</code></pre>
+</section>
+
+<section>
+<h2>2. 驗證結果</h2>
+
+<h3>2.1 自動測試 <span class="pill ok">77 / 77 全過</span></h3>
+<table>
+<tr><th>測試</th><th>指令</th><th>項目</th><th>結果</th></tr>
+<tr><td>Node 單元測試</td><td><code>node --test tests/lib.test.js</code></td><td>38</td><td><span class="pill ok">38 pass / 0 fail</span></td></tr>
+<tr><td>瀏覽器整合測試</td><td><code>http://localhost:8811/test.html</code></td><td>39</td><td><span class="pill ok">39 pass / 0 fail</span></td></tr>
+</table>
+<p class="muted">
+整合測試涵蓋：IndexedDB 初始化、記帳與餘額計算、轉帳雙向增減、
+手動估值與淨資產、快照覆寫、參照完整性保護（有交易的帳戶／分類不可刪）、
+以及備份匯出 → 清空 → 還原的全流程一致性。測試使用獨立的
+<code>moneybook-selftest</code> 資料庫，測完自動刪除，不影響正式資料。
+</p>
+
+<h3>2.2 介面實機操作（瀏覽器驅動）</h3>
+<ol>
+  <li>記帳頁輸入算式 <code>120+50</code> &rarr; 即時顯示 <code>= 170</code> <span class="pill ok">正確</span></li>
+  <li>選分類「飲食」、帳戶「現金」、日期「今天」&rarr; 按完成 <span class="pill ok">寫入成功</span></li>
+  <li>明細頁：本月支出 <code>170</code>、結餘 <code>-170</code>，列出該筆 <span class="pill ok">正確</span></li>
+  <li>資產頁：現金餘額 <code>-170</code>、淨資產 <code>-NT$170</code> <span class="pill ok">正確</span></li>
+  <li>報表頁：日均支出 <code>85</code>、筆數 <code>1</code>、飲食佔比 <code>100.0%</code> <span class="pill ok">正確</span></li>
+  <li>設定頁：備份／CSV 匯出／分類管理／儲存空間／隱私聲明皆正常顯示 <span class="pill ok">正確</span></li>
+</ol>
+<p class="muted">驗證後已清除測試交易，資料庫回到乾淨狀態。</p>
+
+<h3>2.3 過程中的一次假警報</h3>
+<div class="bug">
+<h3>現象：按下「完成」後，明細頁顯示「本月還沒有任何紀錄」</h3>
+<dl>
+  <dt>初判</dt><dd>疑似存檔失敗或畫面未更新</dd>
+  <dt>查證</dt><dd>直接讀取 IndexedDB，發現該筆交易<strong>確實已寫入</strong>（amount 17000 分 = NT$170）</dd>
+  <dt>真因</dt><dd>自動化腳本把「按完成」與「切到明細頁」放在同一個批次內連續送出，
+      <code>submit()</code> 是 <code>async</code>，<code>await store.saveTransaction()</code> 尚未完成，
+      明細頁就先讀了狀態</dd>
+  <dt>結論</dt><dd><span class="pill ok">非程式缺陷</span>，是測試腳本的時序問題。分開操作後各頁數字全部正確</dd>
+</dl>
+</div>
+<div class="note">
+另一個一開始誤判的點：分類按鈕的 element ref 在關閉首次引導對話框後會重新產生，
+沿用舊 ref 會點到失效節點。重新讀取頁面後即正常。
+</div>
+</section>
+
+<section>
+<h2>2.4 啟用 PWA 時發現的兩個真實缺陷</h2>
+<p>
+使用者要求「啟用 PWA」。實測發現 Service Worker <strong>根本沒有註冊</strong>
+（<code>navigator.serviceWorker.getRegistration()</code> 回傳 <code>undefined</code>，
+<code>caches.keys()</code> 為空陣列）。追查後找到兩個獨立的缺陷，兩個都會讓離線功能完全失效。
+</p>
+
+<div class="bug">
+<h3>缺陷一：Service Worker 註冊時機錯誤（<code>js/app.js</code>）</h3>
+<dl>
+  <dt>原始程式碼</dt><dd><code>globalThis.addEventListener('load', () =&gt; { navigator.serviceWorker.register(...) })</code></dd>
+  <dt>問題</dt><dd><code>app.js</code> 以 <code>&lt;script type="module"&gt;</code> 載入，等同 <code>defer</code>；
+      而 <code>registerServiceWorker()</code> 又是在 <code>main()</code> 裡
+      <code>await store.init()</code> <strong>之後</strong>才呼叫。
+      執行到那一行時 <code>load</code> 事件早已觸發完畢，
+      此時才掛上監聽器，它<strong>永遠不會被呼叫</strong>。</dd>
+  <dt>後果</dt><dd>SW 從未註冊 &rarr; 沒有離線快取、沒有更新提示、瀏覽器也不認為這是可安裝的 PWA</dd>
+  <dt>修正</dt><dd>先檢查 <code>document.readyState</code>：已是 <code>complete</code> 就直接註冊，
+      否則才等 <code>load</code>（並加上 <code>{ once: true }</code>）</dd>
+</dl>
+</div>
+
+<div class="bug">
+<h3>缺陷二：開發伺服器單執行緒，被 SW 安裝流程塞死（<code>tools/serve.py</code>）</h3>
+<dl>
+  <dt>原始程式碼</dt><dd><code>socketserver.TCPServer</code>（單執行緒）</dd>
+  <dt>問題</dt><dd>SW 在 install 階段會一次抓取整份 app shell（22 個檔案），
+      瀏覽器同時開多條 keep-alive 連線平行下載。
+      單執行緒伺服器只能一條一條處理，前一條連線未關閉就無法接受下一條。</dd>
+  <dt>後果</dt><dd>伺服器完全停止回應（<code>curl</code> 逾時、頁面變成
+      <code>chrome-error://chromewebdata/</code>），修好缺陷一之後 PWA 仍然裝不起來</dd>
+  <dt>修正</dt><dd>改用 <code>socketserver.ThreadingTCPServer</code>，
+      設定 <code>daemon_threads = True</code>、<code>allow_reuse_address = True</code></dd>
+</dl>
+</div>
+
+<h3>修正後的驗證</h3>
+<table>
+<tr><th>檢查項目</th><th>修正前</th><th>修正後</th></tr>
+<tr><td>SW 註冊</td><td><span class="pill bad">false</span></td><td><span class="pill ok">true</span></td></tr>
+<tr><td>SW 狀態</td><td><span class="pill bad">—</span></td><td><span class="pill ok">activated</span></td></tr>
+<tr><td>頁面受 SW 控制</td><td><span class="pill bad">no</span></td><td><span class="pill ok">yes</span></td></tr>
+<tr><td>快取內容</td><td><span class="pill bad">[]</span></td><td><span class="pill ok">moneybook-v1.0.0：22 檔</span></td></tr>
+<tr><td>平行 10 連線</td><td><span class="pill bad">卡死</span></td><td><span class="pill ok">0.62 秒完成</span></td></tr>
+</table>
+
+<h3>離線實測</h3>
+<p>
+<strong>把伺服器完全關閉</strong>（<code>curl</code> 回傳 <code>HTTP 000</code>）後重新整理頁面，
+App 依然完整載入 &mdash; 分類、帳戶、數字鍵盤、分頁全部正常顯示。
+<span class="pill ok">離線可用確認</span>
+</p>
+
+<div class="note">
+<strong>過程中的另一個假警報：</strong>重啟 preview 伺服器後，首次引導對話框又出現、
+<code>meta</code> store 變空。查證帳戶 UUID 發現與先前<strong>完全不同</strong>，
+證實是瀏覽器在伺服器重啟時清空了該來源的網站資料，
+<code>seedIfEmpty()</code> 因此重建預設帳戶與分類 &mdash;
+並非設定沒有持久化。實測「開始使用」後 <code>firstRunDone</code>
+確實寫入 IndexedDB，且重新整理後仍在、對話框不再出現。
+</div>
+</section>
+
+<section>
+<h2>3. 本次修改</h2>
+
+<h3>3.1 新增 GitHub Pages 自動部署</h3>
+<p>新增 <code>.github/workflows/deploy.yml</code>，推上 <code>main</code> 即自動：</p>
+<ol>
+  <li><strong>先跑測試</strong> &mdash; <code>node --test</code> 沒過就不部署，避免把壞掉的版本推到手機上</li>
+  <li><strong>用 commit SHA 蓋掉 <code>CACHE_VERSION</code></strong> &mdash; 這是關鍵一步</li>
+  <li>產生 <code>version.json</code> 記錄 commit 與建置時間</li>
+  <li>部署到 GitHub Pages</li>
+</ol>
+<div class="note">
+<strong>為什麼一定要蓋 CACHE_VERSION：</strong>
+Service Worker 採 cache-first，若版本字串沒變，已安裝在手機上的 App 會一直吃舊快取、
+永遠更新不到新程式碼。交給 CI 自動蓋章，就不必每次改版都記得手動改版本號 &mdash;
+這正是「GitHub 自動管理程式更新」的核心。
+</div>
+
+<h3>3.2 使用者端的更新流程</h3>
+<pre><code>git push  →  Actions 跑測試  →  蓋新的 CACHE_VERSION  →  部署 Pages
+                                                              ↓
+                        手機開啟 App，SW 偵測到新版本（updatefound）
+                                                              ↓
+                            畫面跳出提示 →  使用者按「重新載入」→  完成更新</code></pre>
+<p class="muted">
+更新只換程式碼快取，<strong>IndexedDB 裡的記帳資料完全不受影響</strong>。
+</p>
+
+<h3>3.3 其他調整</h3>
+<table>
+<tr><th>項目</th><th>變更</th><th>原因</th></tr>
+<tr><td><code>js/app.js</code></td><td>SW 註冊改看 <code>document.readyState</code></td><td>修正缺陷一，見 2.4</td></tr>
+<tr><td><code>tools/serve.py</code></td><td>改用 <code>ThreadingTCPServer</code></td><td>修正缺陷二，見 2.4</td></tr>
+<tr><td>branch</td><td><code>master</code> &rarr; <code>main</code></td><td>GitHub 預設分支名，Pages 設定較直覺</td></tr>
+<tr><td><code>.nojekyll</code></td><td>新增</td><td>避免 GitHub Pages 的 Jekyll 處理干擾靜態檔</td></tr>
+<tr><td><code>.gitignore</code></td><td>加入 <code>version.json</code></td><td>由 CI 產生，不進版控</td></tr>
+</table>
+</section>
+
+<section>
+<h2>4. 需求對照</h2>
+<table>
+<tr><th>#</th><th>需求</th><th>狀態</th><th>對應</th></tr>
+<tr><td>1</td><td>先走 PWA，PC 端可測試</td><td><span class="pill ok">完成</span></td><td><code>python tools/serve.py 8811</code>；SW 已 activated、快取 22 檔、離線實測通過（修正兩個缺陷後）</td></tr>
+<tr><td>2</td><td>流水帳、收支、月底總結</td><td><span class="pill ok">完成</span></td><td>記帳／明細／報表三個分頁</td></tr>
+<tr><td>3</td><td>介面容易使用</td><td><span class="pill ok">完成</span></td><td>自製數字鍵盤、支援算式、分類依使用頻率排序</td></tr>
+<tr><td>4</td><td>架構說明</td><td><span class="pill ok">完成</span></td><td>本文件第 1 節 + <code>README.md</code></td></tr>
+<tr><td>5</td><td>HTML 建構紀錄</td><td><span class="pill ok">完成</span></td><td>本文件</td></tr>
+<tr><td>6</td><td>自動測試</td><td><span class="pill ok">完成</span></td><td>77 項全過</td></tr>
+<tr><td>7</td><td>資料存本機且軟體中說明</td><td><span class="pill ok">完成</span></td><td>純 IndexedDB；設定 → 關於 明載不上傳伺服器</td></tr>
+<tr><td>8</td><td>預留總資產、易擴充</td><td><span class="pill ok">已實作</span></td><td>資產頁已具備帳戶管理、淨資產、快照趨勢（超出「預留」）</td></tr>
+<tr><td>9</td><td>GitHub 自動管理更新</td><td><span class="pill bad">待授權</span></td><td>workflow 已就緒，尚缺 remote &mdash; 需使用者提供 GitHub repo</td></tr>
+</table>
+</section>
+
+<section>
+<h2>5. 待辦</h2>
+<ul>
+  <li><strong>建立 GitHub repo 並設定 remote</strong> &mdash; 需使用者授權，本次未執行</li>
+  <li>repo 建立後到 Settings &rarr; Pages &rarr; Source 選 <strong>GitHub Actions</strong>（不是 Deploy from a branch）</li>
+  <li>首次部署後用手機 Safari／Chrome 開啟網址，驗證「加到主畫面」與離線開啟</li>
+  <li>本機環境未安裝 <code>gh</code> CLI，若要用指令建 repo 需先安裝</li>
+</ul>
+</section>
+
+<footer class="meta" style="margin-top:32px;padding-top:14px;border-top:1px solid var(--border)">
+  MoneyBook 開發紀錄 &mdash; 2026-09-02
+</footer>
+
+</div>
+</body>
+</html>

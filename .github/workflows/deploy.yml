@@ -1,0 +1,68 @@
+# 推上 main 就自動部署到 GitHub Pages。
+#
+# 除了單純把檔案丟上去，這裡還做一件關鍵的事：
+# 把 sw.js 裡的 CACHE_VERSION 換成本次 commit 的 SHA。
+#
+# Service Worker 的快取是 cache-first，若版本字串沒變，
+# 已安裝在手機上的 App 會一直吃舊快取、永遠更新不到新程式碼。
+# 由 CI 自動蓋章，就不必每次改版都記得手動改版本號。
+
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# 同時只跑一個部署，新的推送取代排隊中的舊部署
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      # 測試沒過就不部署，避免把壞掉的版本推到手機上
+      - name: 單元測試
+        run: node --test tests/lib.test.js
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 用 commit SHA 蓋掉 CACHE_VERSION
+        run: |
+          sed -i "s|const CACHE_VERSION = '.*';|const CACHE_VERSION = 'moneybook-${GITHUB_SHA::12}';|" sw.js
+          grep -n "CACHE_VERSION =" sw.js
+
+      - name: 產生版本資訊
+        run: |
+          cat > version.json <<JSON
+          {
+            "commit": "${GITHUB_SHA::12}",
+            "builtAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "ref": "${GITHUB_REF_NAME}"
+          }
+          JSON
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: .
+      - id: deployment
+        uses: actions/deploy-pages@v4

@@ -58,11 +58,23 @@ def local_ip() -> str:
         s.close()
 
 
+class ThreadedServer(socketserver.ThreadingTCPServer):
+    """多執行緒，否則 Service Worker 安裝時會把伺服器塞死。
+
+    SW 在 install 階段會一次抓取整份 app shell（二十多個檔案），
+    瀏覽器又會開多條 keep-alive 連線平行下載。
+    單執行緒的 TCPServer 只能一條一條處理，前一條還沒關閉就無法接下一條，
+    結果是整個伺服器停止回應、PWA 永遠裝不起來。
+    """
+
+    allow_reuse_address = True
+    daemon_threads = True  # 主程式結束時不必等待殘留連線
+
+
 def main() -> None:
     port = int(sys.argv[1]) if len(sys.argv) > 1 else DEFAULT_PORT
-    socketserver.TCPServer.allow_reuse_address = True
 
-    with socketserver.TCPServer(("0.0.0.0", port), Handler) as httpd:
+    with ThreadedServer(("0.0.0.0", port), Handler) as httpd:
         print("=" * 56)
         print("  MoneyBook 開發伺服器")
         print("=" * 56)

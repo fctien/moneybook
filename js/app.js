@@ -165,7 +165,7 @@ function registerServiceWorker() {
   // file:// 開啟時無法註冊 Service Worker，直接略過而不是拋錯
   if (location.protocol === 'file:') return;
 
-  globalThis.addEventListener('load', () => {
+  const register = () => {
     navigator.serviceWorker.register('./sw.js').then((reg) => {
       reg.addEventListener('updatefound', () => {
         const worker = reg.installing;
@@ -176,7 +176,14 @@ function registerServiceWorker() {
         });
       });
     }).catch((err) => console.warn('Service Worker 註冊失敗', err));
-  });
+  };
+
+  // app.js 以 type="module" 載入（等同 defer），而且 main() 裡還 await 了 store.init()，
+  // 走到這一行時 load 事件通常「早就觸發過」了 —— 此時才掛監聽器，它永遠不會被呼叫，
+  // Service Worker 就註冊不上，離線快取與更新提示全部失效。
+  // 因此先看 readyState：已經載入完成就直接註冊，否則才等 load。
+  if (document.readyState === 'complete') register();
+  else globalThis.addEventListener('load', register, { once: true });
 }
 
 main();
