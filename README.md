@@ -48,15 +48,20 @@
 
 整個專案是純靜態檔，任何靜態空間都能跑。**必須用 https 或 localhost**，否則 Service Worker 不會註冊（App 仍可用，只是沒有離線快取）。
 
-### 方式一：GitHub Pages（免費、最推薦）
-```bash
-git remote add origin https://github.com/<你的帳號>/moneybook.git
-git push -u origin main
-```
-接著到 repo 的 Settings → Pages → Source 選 `main` 分支 `/ (root)`，
-幾分鐘後即可用 `https://<你的帳號>.github.io/moneybook/` 開啟。
+### 方式一：GitHub Pages（免費、最推薦，本專案採用）
 
-倉庫設為 Private 也可以正常運作 —— 不過本 App 不含任何個人資料，程式碼公開並無風險。
+已部署於 **https://fctien.github.io/moneybook/**
+
+設定方式：repo 的 Settings → Pages → Source 選 **Deploy from a branch**，
+分支 `main`、資料夾 `/ (root)`。之後每次 `git push` 到 `main`，
+GitHub 會自動重新發佈，不需要 deploy workflow。
+
+```bash
+git push origin main
+```
+
+**倉庫必須設為 Public** —— Private repo 要用 GitHub Pages 需付費方案。
+本 App 不含任何個人資料（帳目只存在瀏覽器的 IndexedDB，從未進版控），程式碼公開並無風險。
 
 ### 方式二：Netlify / Vercel
 把整個資料夾拖進 Netlify Drop（https://app.netlify.com/drop）即可，不需帳號設定。
@@ -101,12 +106,36 @@ python tools/serve.py
 # 單元測試（金額計算、日期、統計、備份序列化）
 node --test tests/lib.test.js
 
+# 檢查 sw.js 的 APP_SHELL 沒有漏檔或列到不存在的檔案
+node tools/check_shell.mjs
+
 # 啟動本機伺服器
 python tools/serve.py
 
 # 瀏覽器整合測試（IndexedDB 讀寫、備份還原全流程）
 # 開啟 http://localhost:8000/test.html
 ```
+
+前兩項會在每次推上 `main` 時由 GitHub Actions（`.github/workflows/ci.yml`）自動執行。
+
+### 更新已安裝在手機上的 App
+
+推上 `main` 後 GitHub Pages 會自動重新發佈，**一般情況下不需要做任何額外動作** ——
+Service Worker 的 fetch 走 stale-while-revalidate：開啟時先用快取立刻顯示畫面，
+同時在背景重抓一次更新快取，所以使用者下一次開啟就是新版。
+
+只有這兩種情況需要手動戳一下版本：
+
+```bash
+python tools/bump_version.py          # 用目前 commit 的短 SHA
+python tools/bump_version.py v1.1.0   # 或自己指定
+```
+
+1. 想讓使用者**這一次**就跳出「已下載新版本」的提示 ——
+   瀏覽器只有在 `sw.js` 的位元組內容變了，才會判定 SW 有新版本並觸發 `updatefound`
+2. 改動牽涉快取結構，需要把舊快取整包丟掉重建
+
+不論哪一種，被清掉的都只是**程式碼快取**，IndexedDB 裡的帳目完全不受影響。
 
 `test.html` 使用獨立的 `moneybook-selftest` 資料庫，**不會動到正式資料**，測完自動刪除。
 

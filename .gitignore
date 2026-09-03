@@ -3,3 +3,5 @@ node_modules/
 Thumbs.db
 *.log
 version.json
+__pycache__/
+*.pyc
