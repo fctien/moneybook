@@ -29,7 +29,8 @@ ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "docs" / "demo"
 SHOTS = OUT / "shots"
 AUDIO = OUT / "audio"
-VIDEO = OUT / "moneybook-記帳教學.mp4"
+# 檔名用 ASCII：中文檔名放上 GitHub Pages 需要網址編碼，容易貼錯連結
+VIDEO = OUT / "moneybook-tutorial.mp4"
 
 BASE_URL = "http://localhost:8811/index.html"
 VOICE = "zh-TW-HsiaoChenNeural"      # 台灣中文女聲

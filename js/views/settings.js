@@ -46,6 +46,17 @@ export function createSettingsView({ appVersion = '1.0.0' } = {}) {
       refs.storageCard,
       buildInstallCard(),
       el('section.card', {}, [
+        el('h2.card__title', { text: '使用教學' }),
+        el('div.row-list', {}, [
+          // 影片放在同一個網域下，不依賴 YouTube 之類的外部平台，
+          // 也就不會有追蹤或被下架的問題
+          rowButton('📺', '觀看教學影片（3 分半）', () => {
+            globalThis.open('./docs/demo/moneybook-tutorial.mp4', '_blank');
+          }),
+        ]),
+        el('p.hint', { text: '從記帳、月結、資產到報表的完整操作示範。' }),
+      ]),
+      el('section.card', {}, [
         el('h2.card__title', { text: '關於' }),
         el('p.about-text', { text: `MoneyBook v${appVersion}` }),
         el('p.about-text.about-text--muted', {

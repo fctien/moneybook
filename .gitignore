@@ -6,8 +6,7 @@ version.json
 __pycache__/
 *.pyc
 
-# 示範影片的產物：由 tools/make_demo_video.py 重現，
-# 影片本身有數 MB，進版控會讓 repo 永久肥大
+# 示範影片的中間產物，由 tools/make_demo_video.py 重新產生即可。
+# 成品 moneybook-tutorial.mp4 要進版控 —— 它是網站上實際提供給使用者的教學影片。
 docs/demo/shots/
 docs/demo/audio/
-docs/demo/*.mp4

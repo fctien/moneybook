@@ -1,6 +1,6 @@
 {
   "name": "moneybook",
-  "version": "1.1.2",
+  "version": "1.2.0",
   "description": "單機個人記帳與資產管理 PWA（iOS / Android，資料全存在手機本地）",
   "type": "module",
   "private": true,

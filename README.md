@@ -103,6 +103,18 @@ python tools/serve.py
 
 ---
 
+## 使用教學影片
+
+**https://fctien.github.io/moneybook/docs/demo/moneybook-tutorial.mp4**
+
+三分半的操作示範，涵蓋記帳、月結、資產與報表。App 內也可從
+「設定 → 使用教學」直接播放。
+
+影片由 `tools/make_demo_video.py` 產生（Playwright 截圖 + edge-tts 旁白 +
+moviepy 合成），改了介面重跑一次就會是新版，不必手工重錄。
+
+---
+
 ## 功能
 
 | 分頁 | 內容 |
