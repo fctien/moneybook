@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MoneyBook 股票模組規劃</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --surface: #fff; --border: #e3e6ea; --text: #1a1d21;
+    --muted: #656d76; --accent: #2563eb; --ok: #16a34a; --bad: #dc2626;
+    --warn: #b45309; --warn-bg: #fef3c7; --code-bg: #f1f3f5;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1115; --surface: #171a1f; --border: #2b3038; --text: #e6e8eb;
+      --muted: #9aa4b0; --accent: #60a5fa; --ok: #4ade80; --bad: #f87171;
+      --warn: #fbbf24; --warn-bg: #3a2a06; --code-bg: #1e2229;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 32px 20px 64px; background: var(--bg); color: var(--text);
+    font-family: system-ui, -apple-system, "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", sans-serif;
+    line-height: 1.7; font-size: 15px;
+  }
+  .wrap { max-width: 880px; margin: 0 auto; }
+  header { border-bottom: 2px solid var(--accent); padding-bottom: 16px; margin-bottom: 28px; }
+  h1 { font-size: 25px; margin: 0 0 6px; }
+  .meta { color: var(--muted); font-size: 13px; }
+  h2 { font-size: 18px; margin: 36px 0 12px; padding-left: 11px; border-left: 4px solid var(--accent); }
+  h3 { font-size: 15px; margin: 22px 0 8px; }
+  section { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 18px 22px; margin-bottom: 18px; }
+  table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 14px; }
+  th, td { border: 1px solid var(--border); padding: 8px 11px; text-align: left; vertical-align: top; }
+  th { background: var(--code-bg); font-weight: 600; }
+  code { background: var(--code-bg); padding: 2px 5px; border-radius: 4px; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 13px; }
+  pre { background: var(--code-bg); padding: 12px 14px; border-radius: 8px; overflow-x: auto; font-size: 13px; line-height: 1.5; }
+  pre code { background: none; padding: 0; }
+  ul, ol { padding-left: 22px; }
+  li { margin: 5px 0; }
+  .pill { display: inline-block; border-radius: 999px; padding: 2px 11px; font-size: 12px; font-weight: 600; }
+  .pill.ok { background: rgba(22,163,74,.14); color: var(--ok); }
+  .pill.bad { background: rgba(220,38,38,.14); color: var(--bad); }
+  .note { background: var(--warn-bg); color: var(--warn); border-radius: 8px; padding: 11px 14px; font-size: 14px; margin: 14px 0; }
+  .muted { color: var(--muted); }
+  .decided { border-left: 4px solid var(--ok); padding-left: 14px; margin: 16px 0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>MoneyBook 股票模組 &mdash; 實作規劃</h1>
+  <div class="meta">
+    2026-09-04 擬定&nbsp;·&nbsp;基準版本 <code>v1.1.2</code>&nbsp;·&nbsp;狀態：<strong>已定案，尚未動工</strong>
+  </div>
+</header>
+
+<section>
+<h2>0. 需求</h2>
+<ol>
+  <li>可以手動輸入</li>
+  <li>可以讀入 CSV 檔案</li>
+  <li>可以計算當日股票總資產</li>
+  <li>提供統計圖形、報表</li>
+</ol>
+</section>
+
+<section>
+<h2>1. 前置研究：股價能不能自動抓</h2>
+<p>
+這一題決定整個架構，所以在規劃前先實測。測試方式是從正式網站的 origin
+（<code>https://fctien.github.io</code>）直接發 <code>fetch</code>，因為
+<code>curl</code> 不受 CORS 限制，測了也不算數。
+</p>
+<table>
+<tr><th>來源</th><th>瀏覽器可直接抓</th><th>說明</th></tr>
+<tr><td>證交所 OpenAPI</td><td><span class="pill bad">否</span></td><td>無 <code>Access-Control-Allow-Origin</code></td></tr>
+<tr><td>證交所即時報價 MIS</td><td><span class="pill bad">否</span></td><td>同上</td></tr>
+<tr><td>櫃買中心 TPEx</td><td><span class="pill bad">否</span></td><td>同上</td></tr>
+<tr><td>Yahoo Finance</td><td><span class="pill bad">否</span></td><td>同上</td></tr>
+<tr><td><strong>FinMind</strong></td><td><span class="pill ok">可以</span></td><td>台股專用，免 token 即可取得日線</td></tr>
+</table>
+
+<p>實測連續抓 7 檔全部成功，未被限流（2026-09-03 收盤）：</p>
+<pre><code>2330 台積電 2390     2317 鴻海   247.5    2454 聯發科 4340
+2308 台達電 1760     2881 富邦金 147      1301 台塑   65.7
+2412 中華電 138      3008 大立光 7150</code></pre>
+
+<p>
+另有 <code>TaiwanStockInfo</code> 資料集，回傳 <strong>4319 檔</strong>股票的
+代號、名稱、產業別、上市/上櫃別。這份下載一次存在本機即可，
+之後代號查名稱、產業分類都不需連網。
+</p>
+
+<div class="note">
+<strong>兩個必須先認清的限制：</strong>
+<ol style="margin:6px 0 0">
+  <li><strong>只有收盤價，沒有盤中即時價</strong> &mdash; tick 資料需付費 token。
+      因此需求 3 實際上是「最近一個交易日的收盤價」，盤中不會跳動。</li>
+  <li><strong>不支援一次查多檔</strong> &mdash; 逗號語法無效，每檔各一個請求。
+      30 檔持股就是 30 個請求，一天抓一次不成問題。</li>
+</ol>
+</div>
+</section>
+
+<section>
+<h2>2. 已定案的四個決策</h2>
+
+<div class="decided">
+<h3>股價來源：自動抓，但<strong>預設關閉</strong></h3>
+<p>
+功能做好但預設不啟用，使用者在設定頁看過說明後自行開啟。
+不開啟時股價改為手動填寫，其他功能全部照常。
+</p>
+</div>
+
+<div class="decided">
+<h3>匯入格式：先只做 CSV</h3>
+<p>
+零額外體積。Excel 可另存為 CSV 再匯入，多一個步驟但不必為此多背 1 MB 的函式庫
+（目前整個 App 含 jsQR 才約 400 KB）。日後視實際需要再評估。
+</p>
+</div>
+
+<div class="decided">
+<h3>成本計算：加權平均成本法</h3>
+<p>
+台灣券商對帳單的標準做法，數字能跟券商 App 對得起來。
+<strong>這個之後不要改</strong> &mdash; 改了會讓已輸入的歷史損益全部不一致。
+</p>
+</div>
+
+<div class="decided">
+<h3>範圍：先只做台股</h3>
+<p>
+FinMind 只涵蓋台股。海外股票要另找資料來源，還牽涉匯率換算，複雜度明顯提高。
+先把台股做完整。
+</p>
+</div>
+</section>
+
+<section>
+<h2>3. 隱私取捨</h2>
+<p>
+這是整個計畫最需要留意的一點。目前 App 的核心宣稱是「資料完全不離開裝置」，
+而抓股價會向 FinMind 送出<strong>持有哪些股票的代號</strong>。
+</p>
+<table>
+<tr><th>會送出</th><th>不會送出</th></tr>
+<tr>
+  <td>股票代號（例如 <code>2330</code>）</td>
+  <td>持有股數<br>成本、損益<br>任何身分資訊</td>
+</tr>
+</table>
+<p>
+也就是說，FinMind 會知道「有個匿名的人查了這 15 檔股票」，
+但不知道是誰、也不知道持有多少。
+</p>
+<div class="note">
+即使如此，這仍然打破了「完全離線」的宣稱。因此：預設關閉、開啟前跳出上表說明、
+設定頁隨時可關。關閉狀態下 App 不會發出任何對外請求。
+</div>
+</section>
+
+<section>
+<h2>4. 資料模型</h2>
+<p>沿用現有 IndexedDB，新增三個 object store：</p>
+<table>
+<tr><th>Store</th><th>用途</th><th>關鍵欄位</th></tr>
+<tr><td><code>stockTrades</code></td><td><strong>交易紀錄（唯一真實來源）</strong></td>
+    <td>id, date, symbol, action(buy/sell/dividend/split/opening), shares, price, fee, tax, note</td></tr>
+<tr><td><code>quotes</code></td><td>股價快取</td><td>symbol, date, close, fetchedAt</td></tr>
+<tr><td><code>stockMeta</code></td><td>代號對照表（4319 檔）</td><td>symbol, name, industry, market</td></tr>
+</table>
+
+<div class="note">
+<strong>持股部位不另外儲存，一律由交易紀錄推算。</strong>
+存兩份遲早會對不起來 &mdash; 這與現有專案「金額用整數分儲存」是同一種考量：
+把可能產生誤差的來源從根本上移除，而不是事後對帳。
+</div>
+
+<p>
+手動輸入「我現在有 1000 股台積電、平均成本 800」會被存成一筆
+<code>opening</code> 交易，因此簡易輸入與逐筆輸入共用同一套計算邏輯，不必維護兩條路徑。
+</p>
+
+<h3>檔案配置（沿用現有分層）</h3>
+<pre><code>js/lib/portfolio.js     部位、加權平均成本、已實現／未實現損益（純函式，可 node --test）
+js/lib/csvimport.js     CSV 解析與欄位對應（純函式）
+js/lib/quotes.js        FinMind 取價與快取（唯一會連外的檔案，集中管理便於稽核）
+js/views/stocks.js      持股列表、新增／編輯、匯入
+js/views/stockreport.js 圖表與報表
+tests/portfolio.test.js
+tests/csvimport.test.js</code></pre>
+</section>
+
+<section>
+<h2>5. 四項需求的做法</h2>
+
+<h3>5.1 手動輸入</h3>
+<ul>
+  <li><strong>簡易模式</strong>：填代號／股數／平均成本，存成一筆 <code>opening</code> 交易</li>
+  <li><strong>完整模式</strong>：逐筆填買進／賣出／股利，自動算已實現與未實現損益</li>
+  <li>代號輸入用本機 4319 檔對照表<strong>即時搜尋</strong>（打「台積」跳出 2330），避免打錯</li>
+  <li>手續費 0.1425%、證交稅 0.3% 自動試算並帶入，但<strong>可覆寫</strong> &mdash; 每家券商折扣不同</li>
+</ul>
+
+<h3>5.2 CSV 匯入</h3>
+<p>各家券商格式差異很大，因此<strong>不寫死格式</strong>，改做欄位對應：</p>
+<pre><code>上傳 CSV → 顯示前 5 列 → 指定「這欄是代號、這欄是股數…」
+        → 預覽解析結果 → 確認匯入</code></pre>
+<p class="muted">
+對應設定會記住，下次同一家券商直接套用。編碼要同時支援 UTF-8 與 Big5
+&mdash; 這一點與發票條碼是同一個坑，券商匯出的 CSV 常常是 Big5。
+</p>
+
+<h3>5.3 股價與總資產</h3>
+<pre><code>按「更新股價」→ 逐檔向 FinMind 取最近收盤價 → 寫入 quotes 快取
+                                             ↓
+                          市值 = Σ(股數 × 收盤價)
+                                             ↓
+                    自動寫回「資產」頁，不必再手動更新估值</code></pre>
+<ul>
+  <li>離線時使用最後一次取得的價格，並<strong>明確標示資料日期</strong></li>
+  <li>個別股票取價失敗單獨標示，不影響其他檔</li>
+  <li>可設定「每天自動更新一次」或純手動</li>
+</ul>
+
+<h3>5.4 圖表與報表</h3>
+<p>沿用現有的自寫 Canvas 圖表，不引入外部套件（避免 CDN 相依讓離線失效）。</p>
+<table>
+<tr><th>圖表</th><th>內容</th></tr>
+<tr><td>持股佔比</td><td>甜甜圈，依市值</td></tr>
+<tr><td>產業分布</td><td>甜甜圈，用 FinMind 的產業別</td></tr>
+<tr><td>個股損益</td><td>橫向長條，紅綠區分</td></tr>
+<tr><td>總市值趨勢</td><td>線圖，接現有的淨資產快照機制</td></tr>
+<tr><td>損益總表</td><td>成本／市值／未實現／已實現／報酬率／年化</td></tr>
+</table>
+</section>
+
+<section>
+<h2>6. 分階段實作</h2>
+<table>
+<tr><th>階段</th><th>內容</th><th>可否獨立驗收</th></tr>
+<tr><td>一</td><td>資料模型 + 手動輸入 + 部位與損益計算 + 純函式測試</td><td><span class="pill ok">可，且不需連網</span></td></tr>
+<tr><td>二</td><td>CSV 匯入（含欄位對應介面、Big5 處理）</td><td><span class="pill ok">可</span></td></tr>
+<tr><td>三</td><td>FinMind 取價（選擇性開啟）+ 自動寫回資產頁</td><td><span class="pill ok">可</span></td></tr>
+<tr><td>四</td><td>圖表與報表</td><td><span class="pill ok">可</span></td></tr>
+</table>
+<p class="muted">
+每階段各自測試、各自部署，不會做到一半卡住。
+每階段完成後照慣例產生 HTML 開發紀錄。
+</p>
+</section>
+
+<section>
+<h2>7. 待確認</h2>
+<ul>
+  <li><strong>尚未開工</strong> &mdash; 等使用者指示再開始第一階段</li>
+  <li>FinMind 免費額度有每小時上限，實作時需確認確切數字並據以設計快取策略</li>
+  <li>股利（現金／股票）對成本基礎的處理方式，實作前需再與使用者確認記帳習慣</li>
+  <li>零股與整股是否分開顯示</li>
+</ul>
+</section>
+
+<footer class="meta" style="margin-top:32px;padding-top:14px;border-top:1px solid var(--border)">
+  MoneyBook 股票模組規劃 &mdash; 2026-09-04
+</footer>
+
+</div>
+</body>
+</html>

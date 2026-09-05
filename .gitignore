@@ -5,3 +5,9 @@ Thumbs.db
 version.json
 __pycache__/
 *.pyc
+
+# 示範影片的產物：由 tools/make_demo_video.py 重現，
+# 影片本身有數 MB，進版控會讓 repo 永久肥大
+docs/demo/shots/
+docs/demo/audio/
+docs/demo/*.mp4

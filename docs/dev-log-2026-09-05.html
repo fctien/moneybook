@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MoneyBook 開發紀錄 2026-09-05</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --surface: #fff; --border: #e3e6ea; --text: #1a1d21;
+    --muted: #656d76; --accent: #2563eb; --ok: #16a34a; --bad: #dc2626;
+    --warn: #b45309; --warn-bg: #fef3c7; --code-bg: #f1f3f5;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1115; --surface: #171a1f; --border: #2b3038; --text: #e6e8eb;
+      --muted: #9aa4b0; --accent: #60a5fa; --ok: #4ade80; --bad: #f87171;
+      --warn: #fbbf24; --warn-bg: #3a2a06; --code-bg: #1e2229;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 32px 20px 64px; background: var(--bg); color: var(--text);
+    font-family: system-ui, -apple-system, "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", sans-serif;
+    line-height: 1.7; font-size: 15px;
+  }
+  .wrap { max-width: 880px; margin: 0 auto; }
+  header { border-bottom: 2px solid var(--accent); padding-bottom: 16px; margin-bottom: 28px; }
+  h1 { font-size: 25px; margin: 0 0 6px; }
+  .meta { color: var(--muted); font-size: 13px; }
+  .meta code { background: var(--code-bg); padding: 2px 6px; border-radius: 4px; font-size: 12px; }
+  h2 { font-size: 18px; margin: 36px 0 12px; padding-left: 11px; border-left: 4px solid var(--accent); }
+  h3 { font-size: 15px; margin: 22px 0 8px; }
+  section { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 18px 22px; margin-bottom: 18px; }
+  table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 14px; }
+  th, td { border: 1px solid var(--border); padding: 8px 11px; text-align: left; vertical-align: top; }
+  th { background: var(--code-bg); font-weight: 600; }
+  code { background: var(--code-bg); padding: 2px 5px; border-radius: 4px; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 13px; }
+  pre { background: var(--code-bg); padding: 12px 14px; border-radius: 8px; overflow-x: auto; font-size: 13px; line-height: 1.5; }
+  pre code { background: none; padding: 0; }
+  ul, ol { padding-left: 22px; }
+  li { margin: 5px 0; }
+  .pill { display: inline-block; border-radius: 999px; padding: 2px 11px; font-size: 12px; font-weight: 600; }
+  .pill.ok { background: rgba(22,163,74,.14); color: var(--ok); }
+  .pill.bad { background: rgba(220,38,38,.14); color: var(--bad); }
+  .bug { border-left: 4px solid var(--bad); padding-left: 14px; margin: 18px 0; }
+  .bug h3 { margin-top: 0; }
+  .bug dl { margin: 8px 0 0; display: grid; grid-template-columns: max-content 1fr; gap: 5px 14px; font-size: 14px; }
+  .bug dt { color: var(--muted); }
+  .bug dd { margin: 0; }
+  .note { background: var(--warn-bg); color: var(--warn); border-radius: 8px; padding: 11px 14px; font-size: 14px; margin: 14px 0; }
+  .muted { color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>MoneyBook 開發紀錄 &mdash; 2026-09-05</h1>
+  <div class="meta">
+    本次主題：<strong>產生記帳功能的教學影片</strong><br>
+    起始 commit <code>355c65f</code>（工作區僅有未追蹤的規劃文件）&nbsp;·&nbsp;
+    App 版本 <code>v1.1.2</code>&nbsp;·&nbsp;
+    Python <code>3.11.7</code>&nbsp;·&nbsp; 本機伺服器 <code>http://localhost:8811</code>
+  </div>
+</header>
+
+<section>
+<h2>1. 需求與做法選擇</h2>
+<p>需求：錄一段影片說明已完成的記帳功能怎麼用。</p>
+
+<h3>為什麼不直接錄螢幕</h3>
+<div class="note">
+螢幕錄影的長度無法與旁白對齊，事後得手工剪接；重跑一次結果也不會一樣。
+改成「每個場景一張截圖，顯示時間直接取自該段旁白的實際長度」，
+畫面與聲音必然同步，而且整支影片可由腳本完全重現。
+</div>
+
+<h3>工具鏈</h3>
+<table>
+<tr><th>階段</th><th>工具</th><th>說明</th></tr>
+<tr><td>截圖</td><td>Playwright（Chromium）</td><td>390&times;844 手機尺寸、2 倍圖，實際操作 App 後逐場景截圖</td></tr>
+<tr><td>旁白</td><td>edge-tts</td><td><code>zh-TW-HsiaoChenNeural</code> 台灣中文女聲，語速 -8%</td></tr>
+<tr><td>合成</td><td>moviepy 2.1.2 + imageio-ffmpeg</td><td>依旁白長度決定每張畫面的秒數，下方燒上字幕</td></tr>
+</table>
+<p class="muted">
+全部寫在單一腳本 <code>tools/make_demo_video.py</code>，可分段重跑：
+<code>capture</code> / <code>narrate</code> / <code>build</code>。
+場景的「操作動作」與「旁白文字」寫在同一個資料結構裡，避免改了一邊忘了另一邊。
+</p>
+</section>
+
+<section>
+<h2>2. 影片內容（16 個場景）</h2>
+<table>
+<tr><th>#</th><th>場景</th><th>秒數</th></tr>
+<tr><td>1</td><td>記帳頁介紹、離線與隱私說明</td><td>17.0</td></tr>
+<tr><td>2</td><td>用數字鍵盤輸入金額</td><td>7.5</td></tr>
+<tr><td>3</td><td>算式輸入 120＋50 ＝ 170</td><td>13.1</td></tr>
+<tr><td>4</td><td>選分類（依使用頻率排序）</td><td>8.8</td></tr>
+<tr><td>5</td><td>選帳戶、日期、備註</td><td>11.3</td></tr>
+<tr><td>6</td><td>按完成存檔</td><td>8.8</td></tr>
+<tr><td>7</td><td>明細頁：本月收支與結餘</td><td>12.8</td></tr>
+<tr><td>8</td><td>切換月份查看歷史</td><td>9.5</td></tr>
+<tr><td>9</td><td>資產頁：自動累算 vs 手動估值</td><td>20.4</td></tr>
+<tr><td>10</td><td>報表頁：近六個月收支</td><td>13.5</td></tr>
+<tr><td>11</td><td>分類佔比</td><td>10.5</td></tr>
+<tr><td>12</td><td>淨資產趨勢線</td><td>13.8</td></tr>
+<tr><td>13</td><td>設定頁：備份的重要性</td><td>12.9</td></tr>
+<tr><td>14</td><td>每月備份＋加到主畫面</td><td>19.1</td></tr>
+<tr><td>15</td><td>掃電子發票</td><td>14.6</td></tr>
+<tr><td>16</td><td>內建使用說明</td><td>15.2</td></tr>
+</table>
+<p><strong>總長 3 分 29 秒</strong>，1080&times;1920 直式，H.264 + AAC，5.1 MB。</p>
+</section>
+
+<section>
+<h2>3. 過程中修掉的兩個問題</h2>
+
+<div class="bug">
+<h3>問題一：捲動指令完全沒有作用</h3>
+<dl>
+  <dt>現象</dt><dd>對 <code>.view--report</code> 設 <code>scrollTop</code> 後畫面紋風不動，
+      報表頁下半部的分類佔比與趨勢圖都拍不到</dd>
+  <dt>原因</dt><dd>可捲動的是外層的 <code>#main</code>，view 本身的
+      <code>overflow-y</code> 是 <code>visible</code>、<code>scrollHeight</code>
+      等於 <code>clientHeight</code>，對它設 <code>scrollTop</code> 沒有任何效果</dd>
+  <dt>修正</dt><dd>加上 <code>scroll_main()</code>，一律對 <code>#main</code> 操作，
+      並以比例而非絕對像素指定位置</dd>
+  <dt>怎麼發現的</dt><dd>寫腳本前先在瀏覽器實測每個選擇器，比對
+      <code>scrollHeight</code> 與 <code>clientHeight</code> 才發現 &mdash;
+      若直接跑腳本，只會得到三張看起來「沒捲動」但不會報錯的截圖</dd>
+</dl>
+</div>
+
+<div class="bug">
+<h3>問題二：淨資產趨勢線是一條平線</h3>
+<dl>
+  <dt>現象</dt><dd>趨勢圖畫出來完全水平，下方顯示「增加 NT$0」</dd>
+  <dt>原因</dt><dd>示範資料用 <code>store.takeSnapshot()</code> 產生五筆快照，
+      但這個函式一律記錄「當下」的淨資產 &mdash; 不管指定哪一天，五筆數值完全相同</dd>
+  <dt>修正</dt><dd>改為直接 <code>db.put()</code> 寫入六筆遞增的快照
+      （2026-04 至 09，淨資產 52 萬 → 62.3 萬）</dd>
+  <dt>結果</dt><dd>趨勢線正確呈現上升，並顯示「4/1 至 9/5：增加 NT$103,220」</dd>
+</dl>
+</div>
+<p class="muted">
+這兩個都不是 App 的缺陷，是示範腳本自身的問題。
+先做一張十六宮格的截圖總覽再逐一檢視，比一張張看快得多，也是這樣才發現趨勢線不對。
+</p>
+</section>
+
+<section>
+<h2>4. 版控處理</h2>
+<table>
+<tr><th>檔案</th><th>處理</th><th>原因</th></tr>
+<tr><td><code>tools/make_demo_video.py</code></td><td>進版控</td><td>影片可由它完全重現</td></tr>
+<tr><td><code>docs/demo/shots/</code>、<code>audio/</code>、<code>*.mp4</code></td><td><strong>加入 .gitignore</strong></td>
+    <td>影片 5.1 MB，進版控會讓 repo 永久肥大；且腳本可重新產生</td></tr>
+<tr><td><code>docs/plan-stocks.html</code></td><td>進版控</td><td>股票模組的規劃文件</td></tr>
+</table>
+</section>
+
+<section>
+<h2>5. 驗證</h2>
+<table>
+<tr><th>項目</th><th>結果</th></tr>
+<tr><td>截圖</td><td><span class="pill ok">16 張全數產出</span></td></tr>
+<tr><td>旁白</td><td><span class="pill ok">16 段全數產出</span></td></tr>
+<tr><td>影片串流</td><td><span class="pill ok">H.264 1080&times;1920 24fps ＋ AAC 44.1kHz 立體聲</span></td></tr>
+<tr><td>時長</td><td><span class="pill ok">00:03:28.74</span></td></tr>
+<tr><td>字幕中文顯示</td><td><span class="pill ok">正常（微軟正黑體）</span></td></tr>
+<tr><td>抽樣畫面檢查</td><td><span class="pill ok">35 秒／110 秒／185 秒三處畫面與字幕皆正確</span></td></tr>
+</table>
+<p class="muted">
+抽樣方式：用 ffmpeg 在三個時間點各抽一格，橫向併成一張圖後檢視，
+確認畫面內容、字幕文字與該時間點的旁白相符。
+</p>
+</section>
+
+<section>
+<h2>6. 待辦</h2>
+<ul>
+  <li>影片目前只交付檔案，<strong>未上架到網站</strong> &mdash;
+      若要讓手機使用者能直接觀看，需決定是否接受 repo 增加 5 MB</li>
+  <li>股票模組已完成規劃（<code>docs/plan-stocks.html</code>），<strong>尚未動工</strong></li>
+</ul>
+</section>
+
+<footer class="meta" style="margin-top:32px;padding-top:14px;border-top:1px solid var(--border)">
+  MoneyBook 開發紀錄 &mdash; 2026-09-05
+</footer>
+
+</div>
+</body>
+</html>
