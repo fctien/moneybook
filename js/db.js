@@ -15,7 +15,7 @@ import {
 } from './lib/schema.js';
 
 export const DB_NAME = 'moneybook';
-export const DB_VERSION = 1;
+export const DB_VERSION = 2;
 
 export const STORE = {
   accounts: 'accounts',
@@ -23,9 +23,14 @@ export const STORE = {
   transactions: 'transactions',
   snapshots: 'snapshots',
   meta: 'meta',
+  stockTrades: 'stockTrades',
+  quotes: 'quotes',
 };
 
-const ALL_STORES = [STORE.accounts, STORE.categories, STORE.transactions, STORE.snapshots, STORE.meta];
+const ALL_STORES = [
+  STORE.accounts, STORE.categories, STORE.transactions, STORE.snapshots,
+  STORE.meta, STORE.stockTrades, STORE.quotes,
+];
 
 let dbPromise = null;
 let activeName = DB_NAME;
@@ -76,6 +81,17 @@ export function openDB() {
       }
       if (!db.objectStoreNames.contains(STORE.meta)) {
         db.createObjectStore(STORE.meta, { keyPath: 'key' });
+      }
+      // v2：股票模組。每個 store 都是先檢查再建立，
+      // 因此舊使用者從 v1 升上來只會多出這兩個，既有資料完全不動。
+      if (!db.objectStoreNames.contains(STORE.stockTrades)) {
+        const s = db.createObjectStore(STORE.stockTrades, { keyPath: 'id' });
+        s.createIndex('date', 'date');
+        s.createIndex('symbol', 'symbol');
+      }
+      if (!db.objectStoreNames.contains(STORE.quotes)) {
+        // 以代號為主鍵：一檔只留最新一筆報價，不需要歷史價位
+        db.createObjectStore(STORE.quotes, { keyPath: 'symbol' });
       }
     };
 
@@ -168,12 +184,14 @@ export async function clearStore(storeName) {
 
 /** 一次載入所有資料到記憶體 */
 export async function loadAll() {
-  const [accounts, categories, transactions, snapshots, metaRows] = await Promise.all([
+  const [accounts, categories, transactions, snapshots, metaRows, stockTrades, quoteRows] = await Promise.all([
     getAll(STORE.accounts),
     getAll(STORE.categories),
     getAll(STORE.transactions),
     getAll(STORE.snapshots),
     getAll(STORE.meta),
+    getAll(STORE.stockTrades),
+    getAll(STORE.quotes),
   ]);
 
   const settings = {};
@@ -182,7 +200,10 @@ export async function loadAll() {
   accounts.sort((a, b) => (a.order ?? 0) - (b.order ?? 0) || a.name.localeCompare(b.name, 'zh-Hant'));
   categories.sort((a, b) => (a.order ?? 0) - (b.order ?? 0) || a.name.localeCompare(b.name, 'zh-Hant'));
 
-  return { accounts, categories, transactions, snapshots, settings };
+  const quotes = {};
+  for (const row of quoteRows) quotes[row.symbol] = row;
+
+  return { accounts, categories, transactions, snapshots, settings, stockTrades, quotes };
 }
 
 export async function getMeta(key, fallback = null) {
@@ -244,6 +265,8 @@ export async function replaceAllData(data) {
   for (const c of data.categories ?? []) t.objectStore(STORE.categories).put(c);
   for (const x of data.transactions ?? []) t.objectStore(STORE.transactions).put(x);
   for (const s of data.snapshots ?? []) t.objectStore(STORE.snapshots).put(s);
+  for (const x of data.stockTrades ?? []) t.objectStore(STORE.stockTrades).put(x);
+  for (const q of Object.values(data.quotes ?? {})) t.objectStore(STORE.quotes).put(q);
   for (const [key, value] of Object.entries(data.settings ?? {})) {
     t.objectStore(STORE.meta).put({ key, value });
   }
@@ -254,13 +277,14 @@ export async function replaceAllData(data) {
 /** 合併匯入：以 id 為準覆蓋同 id 的項目，不刪除現有資料 */
 export async function mergeAllData(data) {
   const db = await openDB();
-  const stores = [STORE.accounts, STORE.categories, STORE.transactions, STORE.snapshots];
+  const stores = [STORE.accounts, STORE.categories, STORE.transactions, STORE.snapshots, STORE.stockTrades];
   const { t, done } = makeTx(db, stores, 'readwrite');
 
   for (const a of data.accounts ?? []) t.objectStore(STORE.accounts).put(a);
   for (const c of data.categories ?? []) t.objectStore(STORE.categories).put(c);
   for (const x of data.transactions ?? []) t.objectStore(STORE.transactions).put(x);
   for (const s of data.snapshots ?? []) t.objectStore(STORE.snapshots).put(s);
+  for (const x of data.stockTrades ?? []) t.objectStore(STORE.stockTrades).put(x);
 
   await done;
 }

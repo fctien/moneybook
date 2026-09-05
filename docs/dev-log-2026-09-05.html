@@ -57,7 +57,7 @@
 <header>
   <h1>MoneyBook 開發紀錄 &mdash; 2026-09-05</h1>
   <div class="meta">
-    本次主題：<strong>產生記帳功能的教學影片</strong><br>
+    本次主題：<strong>記帳教學影片</strong> · <strong>影片上架</strong> · <strong>股票模組第一階段</strong><br>
     起始 commit <code>355c65f</code>（工作區僅有未追蹤的規劃文件）&nbsp;·&nbsp;
     App 版本 <code>v1.1.2</code>&nbsp;·&nbsp;
     Python <code>3.11.7</code>&nbsp;·&nbsp; 本機伺服器 <code>http://localhost:8811</code>
@@ -158,6 +158,10 @@
     <td>影片 5.1 MB，進版控會讓 repo 永久肥大；且腳本可重新產生</td></tr>
 <tr><td><code>docs/plan-stocks.html</code></td><td>進版控</td><td>股票模組的規劃文件</td></tr>
 </table>
+<p class="muted">
+註：影片本身的處理在第 6 節改變了 &mdash; 使用者同意接受 repo 增加 5 MB，
+因此改為進版控並上架，僅中間產物維持忽略。
+</p>
 </section>
 
 <section>
@@ -178,11 +182,100 @@
 </section>
 
 <section>
-<h2>6. 待辦</h2>
+<h2>6. 教學影片上架（v1.2.0）</h2>
+<p>
+使用者同意讓 repo 增加 5 MB，因此影片改為進版控並部署到 GitHub Pages。
+中間產物（截圖、旁白 mp3）仍然忽略，由腳本重新產生即可。
+</p>
 <ul>
-  <li>影片目前只交付檔案，<strong>未上架到網站</strong> &mdash;
-      若要讓手機使用者能直接觀看，需決定是否接受 repo 增加 5 MB</li>
-  <li>股票模組已完成規劃（<code>docs/plan-stocks.html</code>），<strong>尚未動工</strong></li>
+  <li>檔名改為 ASCII <code>moneybook-tutorial.mp4</code> &mdash;
+      中文檔名放上 GitHub Pages 需要網址編碼，連結容易貼錯</li>
+  <li>設定頁新增「使用教學」卡片，一鍵播放</li>
+  <li>影片放在自己的網域下，不依賴 YouTube 之類的外部平台，沒有追蹤問題也不會被下架</li>
+</ul>
+<p class="muted">網址：<code>https://fctien.github.io/moneybook/docs/demo/moneybook-tutorial.mp4</code></p>
+</section>
+
+<section>
+<h2>7. 股票模組 第一階段（v1.3.0）</h2>
+<p>
+依 <code>docs/plan-stocks.html</code> 的規劃執行第一階段：
+資料模型、手動輸入、部位與損益計算、純函式測試。
+第二至四階段（CSV 匯入、自動抓價、圖表）尚未動工。
+</p>
+
+<h3>7.1 核心計算 <code>js/lib/portfolio.js</code></h3>
+<table>
+<tr><th>設計</th><th>理由</th></tr>
+<tr><td><strong>持股部位由交易紀錄推算，不另存一份</strong></td>
+    <td>存兩份遲早會對不起來，而且對不起來時無法判斷哪一份才是對的。
+        與本專案「金額用整數分儲存」同一種考量：把誤差來源從根本移除</td></tr>
+<tr><td><strong>加權平均成本法</strong></td>
+    <td>台灣券商對帳單的標準做法，數字能跟券商 App 對得起來。此決定之後不要改</td></tr>
+<tr><td><strong>賣出成本用 <code>totalCost</code> 依比例攤</strong></td>
+    <td>先算出平均成本再乘回去會累積除不盡的誤差。實測反覆進出二十次後，
+        成本與損益仍精確歸零</td></tr>
+<tr><td><strong>沒有報價時回傳 <code>null</code> 而非 0</strong></td>
+    <td><code>0</code> 會被誤讀成「這檔歸零了」</td></tr>
+<tr><td><strong>少一檔報價就標記整體為不完整</strong></td>
+    <td>少算一檔卻照樣顯示總市值，會讓人誤以為自己在虧損 &mdash;
+        這種誤導比沒有數字更糟</td></tr>
+</table>
+<p class="muted">
+交易種類：期初持股、買進、賣出、現金股利、股票股利。
+現金股利計入已實現收益而不沖減成本（與券商對帳單一致）；
+無償配股增加股數、總成本不變，平均成本因此自然被稀釋。
+</p>
+
+<h3>7.2 資料庫升級 v1 → v2</h3>
+<p>
+新增 <code>stockTrades</code>（索引 date、symbol）與 <code>quotes</code>（以代號為主鍵）。
+<code>onupgradeneeded</code> 本來就是逐一檢查再建立，舊使用者升上來只會多出這兩個，既有資料完全不動。
+</p>
+<div class="note">
+<strong>備份必須同步更新。</strong>加了新的資料類型卻忘了放進備份，
+使用者換手機還原後會少一整塊資料，而且完全沒有錯誤訊息。
+因此 <code>exportPayload</code>、<code>buildBackup</code>、<code>parseBackup</code>、
+<code>replaceAllData</code>、<code>mergeAllData</code> 全部一併處理，
+並補上兩項測試把它釘住：一項驗證來回不遺失，一項驗證舊版備份（沒有股票欄位）仍能還原。
+</div>
+
+<h3>7.3 介面</h3>
+<p>
+股票區塊放在<strong>資產頁</strong>而不是新開分頁 &mdash;
+股票本來就是資產的一部分，底部分頁維持五個也比較好按。
+</p>
+<div class="note">
+<strong>股票市值刻意不自動計入淨資產。</strong>
+多數人早就用「手動估值」開了一個證券帳戶，若這裡再自動加一次就會重複計算。
+重複計算的淨資產比沒有數字更危險 &mdash; 使用者不會發現自己多算了一份。
+畫面上有明確說明，等第三階段能自動抓股價時，會改成由股票區塊直接更新那個帳戶的估值。
+</div>
+
+<h3>7.4 驗證</h3>
+<table>
+<tr><th>項目</th><th>結果</th></tr>
+<tr><td>portfolio 單元測試</td><td><span class="pill ok">28 / 28</span>（第一次執行即全過）</td></tr>
+<tr><td>全部單元測試</td><td><span class="pill ok">107 / 107</span></td></tr>
+<tr><td>資料庫升級</td><td><span class="pill ok">v2，七個 store，既有資料保留</span></td></tr>
+<tr><td>新增持股（1000 股 @ 600，現價 800）</td><td><span class="pill ok">市值 800,000、未實現 +200,000、33.3%</span></td></tr>
+<tr><td>手續費／證交稅自動試算</td><td><span class="pill ok">641.25 / 1,350.00，與費率相符</span></td></tr>
+<tr><td>賣出 500 股 @ 900</td><td><span class="pill ok">已實現 148,008.75，與手算完全一致</span></td></tr>
+<tr><td>備份來回</td><td><span class="pill ok">stockTrades 2 筆、quotes 皆保留</span></td></tr>
+</table>
+<p class="muted">
+既有的 <code>buildBackup 標頭資訊正確</code> 測試因為 <code>counts</code> 多了
+<code>stockTrades</code> 欄位而失敗 &mdash; 這是預期中的變更，已更新該測試的期望值。
+</p>
+</section>
+
+<section>
+<h2>8. 待辦</h2>
+<ul>
+  <li>股票模組<strong>第二階段</strong>：CSV 匯入（含欄位對應介面、Big5 處理）</li>
+  <li>股票模組<strong>第三階段</strong>：FinMind 自動抓價（預設關閉）＋自動更新證券帳戶估值</li>
+  <li>股票模組<strong>第四階段</strong>：持股佔比、產業分布、個股損益、市值趨勢等圖表</li>
+  <li>介面改版後記得重跑 <code>python tools/make_demo_video.py</code> 更新教學影片</li>
 </ul>
 </section>
 

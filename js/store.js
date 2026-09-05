@@ -12,6 +12,7 @@ import {
   validateAccount, validateCategory, validateSnapshot, validateTransaction, newId,
 } from './lib/schema.js';
 import { todayISO } from './lib/dateutil.js';
+import { computePositions, summarizePortfolio, validateTrade } from './lib/portfolio.js';
 
 export const state = {
   accounts: [],
@@ -19,6 +20,9 @@ export const state = {
   transactions: [],
   snapshots: [],
   settings: {},
+  stockTrades: [],
+  // 代號 → { symbol, close, date, source, updatedAt }
+  quotes: {},
   ready: false,
 };
 
@@ -224,6 +228,75 @@ export function sortedSnapshots() {
   return [...state.snapshots].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
 }
 
+// ------------------------------------------------------------- 股票
+
+export async function saveStockTrade(input) {
+  const result = validateTrade(input);
+  if (!result.ok) return result;
+  if (!result.value.id) result.value.id = newId();
+
+  await db.put(db.STORE.stockTrades, result.value);
+
+  const i = state.stockTrades.findIndex((t) => t.id === result.value.id);
+  if (i >= 0) state.stockTrades[i] = result.value;
+  else state.stockTrades.push(result.value);
+
+  notify();
+  return result;
+}
+
+export async function deleteStockTrade(id) {
+  await db.remove(db.STORE.stockTrades, id);
+  state.stockTrades = state.stockTrades.filter((t) => t.id !== id);
+  notify();
+}
+
+/** 刪除某一檔的全部交易紀錄（在持股列表上整檔移除時用） */
+export async function deleteSymbol(symbol) {
+  const ids = state.stockTrades.filter((t) => t.symbol === symbol).map((t) => t.id);
+  for (const id of ids) await db.remove(db.STORE.stockTrades, id);
+  await db.remove(db.STORE.quotes, symbol);
+
+  state.stockTrades = state.stockTrades.filter((t) => t.symbol !== symbol);
+  delete state.quotes[symbol];
+  notify();
+  return ids.length;
+}
+
+export function tradesOf(symbol) {
+  return state.stockTrades.filter((t) => t.symbol === symbol);
+}
+
+/**
+ * 記錄一檔的市價。
+ * source 用來區分是使用者自己填的還是自動抓的 —— 畫面上要標示資料從哪來、有多舊。
+ */
+export async function setQuote(symbol, closeCents, { date = todayISO(), source = 'manual' } = {}) {
+  const row = {
+    symbol: String(symbol).trim().toUpperCase(),
+    close: Math.round(closeCents),
+    date,
+    source,
+    updatedAt: Date.now(),
+  };
+  await db.put(db.STORE.quotes, row);
+  state.quotes[row.symbol] = row;
+  notify();
+  return row;
+}
+
+/** 目前所有持股部位（由交易紀錄推算，不另外儲存） */
+export function stockPositions() {
+  return computePositions(state.stockTrades);
+}
+
+/** 投資組合彙總，含市值與損益 */
+export function portfolioSummary() {
+  const prices = {};
+  for (const [sym, q] of Object.entries(state.quotes)) prices[sym] = q.close;
+  return summarizePortfolio(stockPositions(), prices);
+}
+
 // ------------------------------------------------------------- 設定
 
 export async function setSetting(key, value) {
@@ -245,6 +318,8 @@ export function exportPayload() {
     transactions: state.transactions,
     snapshots: state.snapshots,
     settings: state.settings,
+    stockTrades: state.stockTrades,
+    quotes: state.quotes,
   };
 }
 

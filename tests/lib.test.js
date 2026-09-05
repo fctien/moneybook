@@ -331,7 +331,42 @@ test('buildBackup 標頭資訊正確', () => {
   assert.equal(b.app, 'MoneyBook');
   assert.equal(b.schemaVersion, 1);
   assert.equal(b.exportedAt, '2026-09-01T00:00:00.000Z');
-  assert.deepEqual(b.counts, { accounts: 1, categories: 1, transactions: 1, snapshots: 1 });
+  assert.deepEqual(b.counts, {
+    accounts: 1, categories: 1, transactions: 1, snapshots: 1, stockTrades: 0,
+  });
+});
+
+test('備份含股票交易，還原後不會遺失', () => {
+  // 加了新的資料類型卻忘了放進備份，使用者換手機還原後會少一整塊資料，
+  // 而且完全沒有錯誤訊息 —— 這裡把它釘住。
+  const withStocks = {
+    ...SAMPLE,
+    stockTrades: [{
+      id: 's1', date: '2026-01-02', symbol: '2330', action: 'buy',
+      shares: 1000, price: 60000, fee: 8550, tax: 0, amount: 0, note: '', createdAt: 1,
+    }],
+    quotes: { 2330: { symbol: '2330', close: 80000, date: '2026-09-01', source: 'manual' } },
+  };
+
+  const b = buildBackup(withStocks, '2026-09-01T00:00:00.000Z');
+  assert.equal(b.counts.stockTrades, 1);
+
+  const round = parseBackup(JSON.stringify(b));
+  assert.equal(round.ok, true);
+  assert.equal(round.data.stockTrades.length, 1);
+  assert.equal(round.data.stockTrades[0].symbol, '2330');
+  assert.equal(round.data.quotes['2330'].close, 80000);
+});
+
+test('舊版備份沒有股票欄位也要能還原', () => {
+  const old = buildBackup(SAMPLE, '2026-09-01T00:00:00.000Z');
+  delete old.data.stockTrades;
+  delete old.data.quotes;
+
+  const r = parseBackup(JSON.stringify(old));
+  assert.equal(r.ok, true, '舊備份不該被拒絕');
+  assert.deepEqual(r.data.stockTrades, []);
+  assert.deepEqual(r.data.quotes, {});
 });
 
 test('parseBackup 拒絕壞檔案', () => {

@@ -1018,3 +1018,68 @@ button { cursor: pointer; }
 }
 
 .help-block .guide-list { margin: 0; }
+
+/* ── 股票投資 ─────────────────────────────────────────────── */
+
+.stocks { margin-bottom: 8px; }
+
+.stock-summary { margin: 4px 0 10px; }
+
+.stock-list { display: flex; flex-direction: column; gap: 8px; }
+
+.stock-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 12px 14px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius);
+  background: var(--c-surface);
+  text-align: left;
+  cursor: pointer;
+}
+
+.stock-row__main { flex: 1; min-width: 0; }
+
+.stock-row__title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--c-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stock-row__sub { margin-top: 2px; font-size: 12px; color: var(--c-text-muted); }
+
+.stock-row__right { flex: none; text-align: right; }
+
+.stock-row__value { font-size: 15px; font-variant-numeric: tabular-nums; color: var(--c-text); }
+
+.stock-row__gain { margin-top: 2px; font-size: 12px; font-variant-numeric: tabular-nums; }
+.stock-row__gain.is-up { color: var(--c-expense); }    /* 台股習慣：漲紅跌綠 */
+.stock-row__gain.is-down { color: var(--c-income); }
+
+.trade-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 2px;
+  border-bottom: 1px solid var(--c-border);
+}
+
+.trade-row__main { flex: 1; min-width: 0; }
+.trade-row__title { font-size: 14px; }
+.trade-row__sub { font-size: 12px; color: var(--c-text-muted); }
+.trade-row__amount { flex: none; font-size: 14px; font-variant-numeric: tabular-nums; }
+
+.input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-sm);
+  background: var(--c-surface-2);
+  color: var(--c-text);
+  font-size: 16px; /* 小於 16px 時 iOS Safari 會在聚焦時自動放大整個頁面 */
+}

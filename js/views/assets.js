@@ -15,6 +15,7 @@ import { todayISO, formatDayLabel } from '../lib/dateutil.js';
 import { accountBalances } from '../lib/stats.js';
 import { ACCOUNT_KINDS, accountKind } from '../lib/schema.js';
 import * as store from '../store.js';
+import { createStocksSection } from './stocks.js';
 
 export function createAssetsView() {
   const node = el('section.view.view--assets');
@@ -26,9 +27,11 @@ export function createAssetsView() {
     clear(node);
     refs.hero = el('div.networth-hero');
     refs.groups = el('div.account-groups');
+    refs.stocks = createStocksSection();
 
     node.append(
       refs.hero,
+      refs.stocks.node,
       el('div.section-head', {}, [
         el('h2.section-head__title', { text: '帳戶與資產' }),
         el('button.link-btn', { type: 'button', onClick: () => openAccountEditor(null) }, ['+ 新增']),
@@ -282,6 +285,7 @@ export function createAssetsView() {
 
   function refresh() {
     renderHero();
+    refs.stocks.refresh();
     renderGroups();
   }
 

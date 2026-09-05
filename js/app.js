@@ -10,7 +10,7 @@ import { createAssetsView } from './views/assets.js';
 import { createReportView } from './views/report.js';
 import { createSettingsView } from './views/settings.js';
 
-export const APP_VERSION = '1.2.0';
+export const APP_VERSION = '1.3.0';
 
 const TABS = [
   { id: 'entry', label: '記帳', icon: '✏️' },

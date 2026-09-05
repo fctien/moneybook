@@ -7,6 +7,7 @@
  */
 
 import { SCHEMA_VERSION, validateAccount, validateCategory, validateSnapshot, validateTransaction } from './schema.js';
+import { validateTrade } from './portfolio.js';
 
 export const BACKUP_MAGIC = 'MoneyBook';
 
@@ -20,18 +21,26 @@ export function buildBackup(data, exportedAt) {
   const categories = data.categories ?? [];
   const transactions = data.transactions ?? [];
   const snapshots = data.snapshots ?? [];
+  const stockTrades = data.stockTrades ?? [];
+  const quotes = data.quotes ?? {};
 
   return {
     app: BACKUP_MAGIC,
     schemaVersion: SCHEMA_VERSION,
     exportedAt: exportedAt ?? new Date().toISOString(),
     counts: {
+      stockTrades: stockTrades.length,
       accounts: accounts.length,
       categories: categories.length,
       transactions: transactions.length,
       snapshots: snapshots.length,
+      stockTrades: stockTrades.length,
     },
-    data: { accounts, categories, transactions, snapshots, settings: data.settings ?? {} },
+    data: {
+      accounts, categories, transactions, snapshots,
+      stockTrades, quotes,
+      settings: data.settings ?? {},
+    },
   };
 }
 
@@ -70,6 +79,9 @@ export function parseBackup(text) {
   const accounts = pick(src.accounts, validateAccount, 'accounts', skipped);
   const categories = pick(src.categories, validateCategory, 'categories', skipped);
   const snapshots = pick(src.snapshots, validateSnapshot, 'snapshots', skipped);
+  // 股票交易走 portfolio.js 的驗證。舊版備份沒有這個欄位，
+  // pick 收到 undefined 會回傳空陣列，因此不必特別處理相容性。
+  const stockTrades = pick(src.stockTrades, validateTrade, 'stockTrades', skipped);
 
   const accountIds = new Set(accounts.map((a) => a.id));
   const categoryIds = new Set(categories.map((c) => c.id));
@@ -87,13 +99,17 @@ export function parseBackup(text) {
       categories,
       transactions,
       snapshots,
+      stockTrades,
+      quotes: typeof src.quotes === 'object' && src.quotes ? src.quotes : {},
       settings: typeof src.settings === 'object' && src.settings ? src.settings : {},
     },
     counts: {
+      stockTrades: stockTrades.length,
       accounts: accounts.length,
       categories: categories.length,
       transactions: transactions.length,
       snapshots: snapshots.length,
+      stockTrades: stockTrades.length,
     },
     exportedAt: typeof raw.exportedAt === 'string' ? raw.exportedAt : null,
     skipped,
