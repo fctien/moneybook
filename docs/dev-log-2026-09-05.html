@@ -372,7 +372,67 @@
 </section>
 
 <section>
-<h2>9. 待辦</h2>
+<h2>9. 只有名稱、沒有代號的截圖（v1.5.0）</h2>
+<p>
+使用者指出實務上的缺口：不少券商的庫存畫面<strong>只顯示股票名稱</strong>。
+原本的解析器以代號為錨點，這種排版整列會被直接略過。
+</p>
+
+<h3>9.1 做法：內建代號對照表</h3>
+<table>
+<tr><th>檔案</th><th>內容</th></tr>
+<tr><td><code>tools/make_stocklist.py</code></td><td>對照表產生器（可重跑更新）</td></tr>
+<tr><td><code>js/lib/twstocks.js</code></td><td>3114 檔上市／上櫃／興櫃，65 KB，自動產生</td></tr>
+<tr><td><code>js/lib/stocklookup.js</code></td><td>名稱反查、關鍵字搜尋</td></tr>
+</table>
+<div class="note">
+<strong>為什麼內建而不是即時查詢：</strong>即時查詢會把「使用者持有哪些股票」
+送到外部服務，牴觸本專案的隱私原則；而且離線時就不能用。
+代號與名稱是公開事實、變動很慢，內建一份完全足夠。
+新上市的股票查不到時，使用者仍可自行輸入代號。
+</div>
+<p class="muted">
+資料存成一整條字串而非物件陣列 —— 同樣的內容，字串體積約只有 JSON 的一半，
+載入時才展開成查表結構。
+</p>
+
+<h3>9.2 最重要的性質：不確定時不要猜</h3>
+<div class="note">
+填錯代號比留白危險得多。留白使用者一定會看到並補上；
+填錯了卻長得很正常，會一路錯到損益報表都對不起來。
+因此只有<strong>唯一命中</strong>才自動帶入 &mdash;
+「台灣」「高股息」會命中幾十檔 ETF，一律留白；一個字的輸入也一律不猜。
+自動帶入的代號會標上「由名稱推定」並附可修改的欄位，提醒使用者確認。
+</div>
+
+<h3>9.3 修掉的一個問題</h3>
+<div class="bug">
+<h3>查不到的股票被無聲略過</h3>
+<dl>
+  <dt>現象</dt><dd>貼上含「某某未上市」的內容，該列消失且沒有任何提示</dd>
+  <dt>原因</dt><dd>判斷「這一列是不是持股資料」時只看同一行有沒有數字，
+      但券商截圖最常見的排版是名稱單獨一行、數字全在下一行</dd>
+  <dt>為什麼要在意</dt><dd>使用者要能分辨「沒讀到這一列」與「讀到了但認不出是哪一檔」。
+      少掉幾檔卻毫無徵兆，比整批失敗還糟</dd>
+  <dt>修正</dt><dd>加入 <code>looksLikeDataRow()</code>：同一行有數字，
+      或下一行全是數字，都算資料列。標題列（下一行不是純數字）則不會被誤報</dd>
+</dl>
+</div>
+
+<h3>9.4 驗證</h3>
+<table>
+<tr><th>項目</th><th>結果</th></tr>
+<tr><td>查表測試</td><td><span class="pill ok">15 / 15</span>（含「不亂猜」那一組）</td></tr>
+<tr><td>全部單元測試</td><td><span class="pill ok">166 / 166</span></td></tr>
+<tr><td>只有名稱的兩行式排版</td><td><span class="pill ok">台積電→2330、鴻海→2317</span></td></tr>
+<tr><td>「由名稱推定」標記與可改代號欄</td><td><span class="pill ok">正常顯示</span></td></tr>
+<tr><td>查不到的名稱</td><td><span class="pill ok">明確提示，不再無聲消失</span></td></tr>
+<tr><td>「庫存明細」等標題列</td><td><span class="pill ok">不會被誤報成認不出的股票</span></td></tr>
+</table>
+</section>
+
+<section>
+<h2>10. 待辦</h2>
 <ul>
   <li>股票模組<strong>第三階段</strong>：FinMind 自動抓價（預設關閉）＋自動更新證券帳戶估值</li>
   <li>股票模組<strong>第四階段</strong>：持股佔比、產業分布、個股損益、市值趨勢等圖表</li>

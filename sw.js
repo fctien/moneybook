@@ -9,7 +9,7 @@
  * 清除快取只會讓 App 重新下載程式碼，不會動到任何一筆帳。
  */
 
-const CACHE_VERSION = 'moneybook-v1.4.0';
+const CACHE_VERSION = 'moneybook-v1.5.0';
 
 const APP_SHELL = [
   './',
@@ -27,6 +27,9 @@ const APP_SHELL = [
   './js/lib/schema.js',
   './js/lib/backup.js',
   './js/lib/importparse.js',
+  './js/lib/stocklookup.js',
+  // 台股代號對照表，約 65 KB，由 tools/make_stocklist.py 產生
+  './js/lib/twstocks.js',
   './js/lib/install.js',
   './js/lib/invoice.js',
   './js/lib/portfolio.js',

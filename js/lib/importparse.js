@@ -168,6 +168,18 @@ function findName(tokens, symbol) {
   return '';
 }
 
+/**
+ * 這一列看起來像不像一筆持股資料（而不是標題或頁尾）。
+ *
+ * 兩種都算：同一行就帶數字，或名稱單獨一行、數字全在下一行 ——
+ * 後者是券商截圖經文字辨識後最常見的排版。
+ */
+function looksLikeDataRow(tokens, nextTokens) {
+  if (tokens.some((t) => toNumber(t) !== null)) return true;
+  const next = (nextTokens ?? []).filter((t) => String(t).trim() !== '');
+  return next.length > 0 && next.every((t) => toNumber(t) !== null);
+}
+
 // --------------------------------------------------------------------------
 // 主要解析
 // --------------------------------------------------------------------------
@@ -181,10 +193,15 @@ function findName(tokens, symbol) {
  * 券商 App 截圖經過文字辨識後，同一筆常被拆成兩行（第一行代號與名稱、
  * 第二行才是數字），因此找不到數字時會往下一行借。
  *
+ * 有些券商的庫存畫面只顯示名稱而不顯示代號，這種情況會用 lookup
+ * 由名稱反查代號；查不到就整列略過，並在 unresolved 回報，
+ * 讓使用者知道是「有這一列但認不出來」而不是「沒讀到東西」。
+ *
  * @param {string} text
- * @returns {{rows: object[], skipped: number}}
+ * @param {{lookup?: (name:string) => string|null}} [opts]
+ * @returns {{rows: object[], skipped: number, unresolved: string[]}}
  */
-export function extractHoldings(text) {
+export function extractHoldings(text, opts = {}) {
   const src = String(text ?? '').replace(/\r\n?/g, '\n');
   // 先拿掉千分位再判斷，否則「1,000」會讓純文字被誤認成 CSV
   const looksTabular = /[\t;]/.test(src) || /,/.test(stripThousands(src));
@@ -193,14 +210,36 @@ export function extractHoldings(text) {
     ? parseCSV(src)
     : src.split('\n').map((l) => l.trim().split(/\s{1,}/).filter(Boolean));
 
+  const lookup = typeof opts.lookup === 'function' ? opts.lookup : null;
   const rows = [];
+  const unresolved = [];
   let skipped = 0;
 
   for (let i = 0; i < lines.length; i += 1) {
     const tokens = lines[i].filter((t) => String(t).trim() !== '');
     if (!tokens.length) continue;
 
-    const symbol = findSymbol(tokens);
+    let symbol = findSymbol(tokens);
+    let resolvedBy = 'code';
+
+    // 只顯示名稱、沒有代號的排版：由名稱反查。
+    // 查不到就記進 unresolved 而不是靜靜丟掉 —— 使用者要能分辨
+    // 「這一列沒讀到」與「這一列讀到了但認不出是哪一檔」。
+    if (!symbol && lookup) {
+      const candidate = findName(tokens, '');
+      if (candidate) {
+        const hit = lookup(candidate);
+        if (hit) {
+          symbol = hit;
+          resolvedBy = 'name';
+        } else if (looksLikeDataRow(tokens, lines[i + 1])) {
+          // 只在「這一列看起來真的是一筆持股」時才回報，
+          // 否則「庫存明細」這種標題也會被當成認不出的股票，警告就變成雜訊
+          unresolved.push(candidate);
+        }
+      }
+    }
+
     if (!symbol) { skipped += 1; continue; }
 
     let numbers = tokens
@@ -211,7 +250,9 @@ export function extractHoldings(text) {
     // 數字在下一行：截圖辨識常見的斷行方式
     if (!numbers.length && lines[i + 1]) {
       const next = lines[i + 1].filter((t) => String(t).trim() !== '');
-      if (!findSymbol(next)) {
+      // 下一行本身若是另一檔股票就不能借，否則會把兩檔混成一筆
+      const nextIsAnother = findSymbol(next) || (lookup && lookup(findName(next, '')));
+      if (!nextIsAnother) {
         numbers = next.map(toNumber).filter((n) => n !== null);
         i += 1; // 這一行已經用掉了
       }
@@ -221,10 +262,11 @@ export function extractHoldings(text) {
       symbol,
       name: findName(tokens, symbol),
       numbers,
+      resolvedBy,
     });
   }
 
-  return { rows, skipped };
+  return { rows, skipped, unresolved };
 }
 
 /**

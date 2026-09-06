@@ -155,6 +155,96 @@ test('空輸入不會拋例外', () => {
   assert.deepEqual(extractHoldings(null).rows, []);
 });
 
+// ── 只有名稱、沒有代號 ──────────────────────────────────────
+
+// 假的查表，避免這組測試相依於真實的 3000 檔資料
+const LOOKUP = (name) => ({
+  台積電: '2330', 鴻海: '2317', 元大台灣50: '0050',
+}[String(name).trim()] ?? null);
+
+test('只有名稱時用查表補上代號', () => {
+  const text = `台積電 1,000 600.00 800.00
+鴻海 2,000 105.50 247.50`;
+  const { rows } = extractHoldings(text, { lookup: LOOKUP });
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0].symbol, '2330');
+  assert.equal(rows[0].resolvedBy, 'name', '要標記是靠名稱推出來的，讓畫面能提醒使用者確認');
+  assert.deepEqual(rows[0].numbers, [1000, 600, 800]);
+});
+
+test('沒有提供查表時，只有名稱的列照舊略過', () => {
+  const { rows } = extractHoldings('台積電 1,000 600.00');
+  assert.equal(rows.length, 0, '沒有查表就無從得知是哪一檔');
+});
+
+test('有代號時不會被查表覆蓋，且標記為 code', () => {
+  const { rows } = extractHoldings('2330 台積電 1,000 600.00', { lookup: LOOKUP });
+  assert.equal(rows[0].symbol, '2330');
+  assert.equal(rows[0].resolvedBy, 'code');
+});
+
+test('查不到的名稱會列進 unresolved，而不是無聲消失', () => {
+  // 使用者要能分辨「沒讀到這一列」與「讀到了但認不出是哪一檔」
+  const text = `台積電 1,000 600.00
+未知證券 500 100.00`;
+  const { rows, unresolved } = extractHoldings(text, { lookup: LOOKUP });
+  assert.equal(rows.length, 1);
+  assert.deepEqual(unresolved, ['未知證券']);
+});
+
+test('沒有數字的雜訊列不會被當成未解析的股票', () => {
+  const text = `庫存查詢
+股票名稱 股數 成本
+台積電 1,000 600.00`;
+  const { rows, unresolved } = extractHoldings(text, { lookup: LOOKUP });
+  assert.equal(rows.length, 1);
+  assert.deepEqual(unresolved, [], '純標題列沒有數字，不該被當成認不出的股票');
+});
+
+test('名稱與數字分成兩行，且沒有代號', () => {
+  const text = `台積電
+1,000    600.00    800.00
+鴻海
+2,000    105.50    247.50`;
+  const { rows } = extractHoldings(text, { lookup: LOOKUP });
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0].symbol, '2330');
+  assert.deepEqual(rows[0].numbers, [1000, 600, 800]);
+  assert.equal(rows[1].symbol, '2317');
+  assert.deepEqual(rows[1].numbers, [2000, 105.5, 247.5]);
+});
+
+test('連續兩個只有名稱的列不會被併成一筆', () => {
+  // 下一行若本身就是另一檔股票，就不能拿來當這一筆的數字
+  const text = `台積電
+鴻海 2,000 105.50`;
+  const { rows } = extractHoldings(text, { lookup: LOOKUP });
+  assert.equal(rows.length, 2);
+  assert.deepEqual(rows[0].numbers, [], '台積電沒有數字就該是空的');
+  assert.equal(rows[1].symbol, '2317');
+  assert.deepEqual(rows[1].numbers, [2000, 105.5]);
+});
+
+test('名稱單獨一行、數字在下一行且查不到時，也要列進 unresolved', () => {
+  // 這是券商截圖最常見的排版；先前只看「同一行有沒有數字」會讓它無聲消失
+  const text = `台積電
+1,000  600.00
+某某未上市
+300  50.00`;
+  const { rows, unresolved } = extractHoldings(text, { lookup: LOOKUP });
+  assert.equal(rows.length, 1);
+  assert.deepEqual(unresolved, ['某某未上市']);
+});
+
+test('標題列即使下一行是股票，也不會被當成認不出的股票', () => {
+  const text = `庫存明細
+台積電
+1,000  600.00`;
+  const { rows, unresolved } = extractHoldings(text, { lookup: LOOKUP });
+  assert.equal(rows.length, 1);
+  assert.deepEqual(unresolved, [], '「庫存明細」的下一行不是純數字，不算資料列');
+});
+
 // ── 欄位建議 ────────────────────────────────────────────────
 
 test('suggestMapping 把最大的整數欄猜成股數', () => {

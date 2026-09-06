@@ -15,6 +15,7 @@ import {
   FIELD, decodeText, extractHoldings, suggestMapping,
   mergeBatches, combineDuplicates, rowsToTrades,
 } from '../lib/importparse.js';
+import { nameToSymbol } from '../lib/stocklookup.js';
 import * as store from '../store.js';
 
 const FIELD_LABEL = {
@@ -33,7 +34,11 @@ const SAMPLE = `2330 台積電 1,000 600.00 800.00
  */
 export function openStockImport({ onDone } = {}) {
   // batches：每貼一次或每上傳一個檔案算一批，用來支援庫存分好幾頁的情況
-  const stateIn = { batches: [], mapping: [], rows: [], duplicates: [], combined: false };
+  const stateIn = {
+    batches: [], mapping: [], rows: [], duplicates: [], combined: false,
+    // 讀到了但查不出是哪一檔的名稱，要讓使用者知道有東西被漏掉
+    unresolved: [],
+  };
 
   openSheet('匯入持股', (body, close) => {
     const render = () => {
@@ -42,6 +47,8 @@ export function openStockImport({ onDone } = {}) {
       if (stateIn.rows.length) {
         body.append(buildMapping(), buildPreview(), buildActions());
       } else {
+        const unresolved = buildUnresolved();
+        if (unresolved) body.append(unresolved);
         body.append(buildHelp());
       }
     };
@@ -55,9 +62,18 @@ export function openStockImport({ onDone } = {}) {
       });
 
       const addText = (text) => {
-        const { rows, skipped } = extractHoldings(text);
+        // 券商庫存畫面常常只有名稱沒有代號，交給查表補上
+        const { rows, skipped, unresolved } = extractHoldings(text, { lookup: nameToSymbol });
+        if (unresolved.length) stateIn.unresolved.push(...unresolved);
+
         if (!rows.length) {
-          toast(`沒有辨識到任何股票代號（略過 ${skipped} 行）`, 'error', 3600);
+          toast(
+            unresolved.length
+              ? `認不出 ${unresolved.join('、')}，請改貼含代號的畫面`
+              : `沒有辨識到任何股票（略過 ${skipped} 行）`,
+            'error', 4000,
+          );
+          if (unresolved.length) render();
           return;
         }
         stateIn.batches.push(rows);
@@ -163,8 +179,30 @@ export function openStockImport({ onDone } = {}) {
 
     // ------------------------------------------------------------ 預覽
 
+    function buildUnresolved() {
+      if (!stateIn.unresolved.length) return null;
+      const names = [...new Set(stateIn.unresolved)];
+
+      // 這些是「有讀到但認不出來」的列。不講的話使用者會以為全部都匯進去了，
+      // 少掉幾檔卻毫無徵兆，比整批失敗還糟。
+      return el('div.hint.hint--warn', {}, [
+        el('div', {
+          text: `認不出這些名稱：${names.join('、')}。`
+            + '對照表可能沒收錄（新上市、名稱被截斷），請改貼含股票代號的畫面，'
+            + '或用「+ 新增持股」手動輸入。',
+        }),
+        el('button.link-btn', {
+          type: 'button',
+          onClick: () => { stateIn.unresolved = []; render(); },
+        }, ['知道了，不再提醒']),
+      ]);
+    }
+
     function buildPreview() {
       const wrap = el('div.import-preview');
+
+      const unresolved = buildUnresolved();
+      if (unresolved) wrap.append(unresolved);
 
       if (stateIn.duplicates.length) {
         wrap.append(el('div.hint.hint--warn', {}, [
@@ -212,7 +250,21 @@ export function openStockImport({ onDone } = {}) {
               text: (row.name ? `${row.symbol} ${row.name}` : row.symbol)
                 + (row.mergedFrom > 1 ? `（合併 ${row.mergedFrom} 筆）` : ''),
             }),
+            // 靠名稱推出來的代號要標示，使用者才知道這一筆值得多看一眼
+            row.resolvedBy === 'name'
+              ? el('span.badge', { text: '由名稱推定', title: '原始畫面沒有代號，代號是查表補上的' })
+              : null,
           ]),
+          row.resolvedBy === 'name'
+            ? el('div.import-row__symbol', {}, [
+              el('span.import-field__label', { text: '代號（推定錯誤請改這裡）' }),
+              el('input.input.input--sm', {
+                type: 'text',
+                value: row.symbol,
+                onInput: (e) => { row.symbol = e.target.value.trim().toUpperCase(); },
+              }),
+            ])
+            : null,
           el('div.import-row__fields', {}, [
             labelled('股數', num('shares', '必填')),
             labelled('成本價', num('avgCost', '必填')),
@@ -242,6 +294,7 @@ export function openStockImport({ onDone } = {}) {
             stateIn.duplicates = [];
             stateIn.mapping = [];
             stateIn.combined = false;
+            stateIn.unresolved = [];
             render();
           },
         }, ['清空重來']),

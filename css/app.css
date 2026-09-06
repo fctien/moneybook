@@ -1130,3 +1130,15 @@ button { cursor: pointer; }
 .import-field__label { display: block; font-size: 11px; color: var(--c-text-muted); margin-bottom: 3px; }
 
 .input--sm { padding: 7px 9px; font-size: 16px; }
+
+.badge {
+  flex: none;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--c-warning-bg);
+  color: var(--c-warning);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.import-row__symbol { margin-top: 8px; }
