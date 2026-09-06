@@ -1083,3 +1083,50 @@ button { cursor: pointer; }
   color: var(--c-text);
   font-size: 16px; /* 小於 16px 時 iOS Safari 會在聚焦時自動放大整個頁面 */
 }
+
+/* ── 持股匯入 ─────────────────────────────────────────────── */
+
+.section-head__actions { display: flex; gap: 14px; align-items: baseline; }
+
+.import-textarea {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-sm);
+  background: var(--c-surface-2);
+  color: var(--c-text);
+  font-size: 16px; /* 低於 16px 時 iOS Safari 聚焦會自動放大整頁 */
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  resize: vertical;
+}
+
+.import-buttons { display: flex; gap: 8px; margin-top: 8px; }
+.import-buttons .btn { flex: 1; }
+
+.map-row { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; }
+.map-col { flex: none; min-width: 104px; }
+.map-col__label { font-size: 12px; color: var(--c-text-muted); margin-bottom: 4px; }
+.map-col__sample {
+  margin-top: 3px;
+  font-size: 11px;
+  color: var(--c-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.import-preview { margin: 12px 0; }
+
+.import-row {
+  padding: 10px 2px;
+  border-bottom: 1px solid var(--c-border);
+}
+.import-row.is-skipped { opacity: 0.42; }
+
+.import-row__head { display: flex; align-items: center; gap: 8px; }
+.import-row__head input[type="checkbox"] { width: 20px; height: 20px; accent-color: var(--c-accent); }
+.import-row__title { font-size: 15px; font-weight: 600; }
+
+.import-row__fields { display: flex; gap: 8px; margin-top: 8px; }
+.import-field { flex: 1; min-width: 0; }
+.import-field__label { display: block; font-size: 11px; color: var(--c-text-muted); margin-bottom: 3px; }
+
+.input--sm { padding: 7px 9px; font-size: 16px; }

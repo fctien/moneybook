@@ -36,7 +36,16 @@ export function createStocksSection() {
     node.append(
       el('div.section-head', {}, [
         el('h2.section-head__title', { text: '股票投資' }),
-        el('button.link-btn', { type: 'button', onClick: () => openHoldingEditor() }, ['+ 新增持股']),
+        el('div.section-head__actions', {}, [
+          el('button.link-btn', {
+            type: 'button',
+            onClick: async () => {
+              const { openStockImport } = await import('./stockimport.js');
+              openStockImport({ onDone: refresh });
+            },
+          }, ['匯入']),
+          el('button.link-btn', { type: 'button', onClick: () => openHoldingEditor() }, ['+ 新增持股']),
+        ]),
       ]),
       refs.summary,
       refs.list,

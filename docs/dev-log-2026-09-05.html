@@ -57,7 +57,7 @@
 <header>
   <h1>MoneyBook 開發紀錄 &mdash; 2026-09-05</h1>
   <div class="meta">
-    本次主題：<strong>記帳教學影片</strong> · <strong>影片上架</strong> · <strong>股票模組第一階段</strong><br>
+    本次主題：<strong>記帳教學影片</strong> · <strong>影片上架</strong> · <strong>股票模組第一、二階段</strong><br>
     起始 commit <code>355c65f</code>（工作區僅有未追蹤的規劃文件）&nbsp;·&nbsp;
     App 版本 <code>v1.1.2</code>&nbsp;·&nbsp;
     Python <code>3.11.7</code>&nbsp;·&nbsp; 本機伺服器 <code>http://localhost:8811</code>
@@ -270,9 +270,110 @@
 </section>
 
 <section>
-<h2>8. 待辦</h2>
+<h2>8. 股票模組 第二階段：匯入（v1.4.0）</h2>
+
+<h3>8.1 先查證：手機能不能自動讀到券商的庫存</h3>
+<p><strong>不能。</strong>這是平台的根本限制，不是還沒做：</p>
 <ul>
-  <li>股票模組<strong>第二階段</strong>：CSV 匯入（含欄位對應介面、Big5 處理）</li>
+  <li>iOS／Android 的沙箱機制讓每個 App 只能讀自己的資料，元大行動精靈的庫存
+      存在它的私有目錄，任何其他 App 都讀不到</li>
+  <li>PWA 的權限<strong>比原生 App 還低</strong>，就算改寫成原生 App 也一樣讀不到</li>
+  <li>券商 API（永豐 Shioaji、富邦 Neo、富果）都是需要憑證檔的桌面／Python SDK，
+      瀏覽器跑不了，且 CORS 會擋；元大根本沒有公開的個人 API</li>
+</ul>
+
+<h3>8.2 集保 e 手掌握的匯出格式</h3>
+<div class="note">
+查證結果：可以匯出庫存明細，但格式是<strong>帶數位簽章的 PDF</strong>，不是 CSV。
+引入 PDF 解析函式庫要多背 1 MB 以上，而「開啟 PDF → 選取文字 → 拷貝」
+與「截圖 → iOS 即時文字 → 拷貝」都是系統內建、零成本。
+因此不做 PDF 解析，統一走「貼上文字」—— 這條路同時涵蓋券商 App 截圖、
+集保 PDF、券商網頁表格三種來源。
+</div>
+
+<h3>8.3 實作</h3>
+<table>
+<tr><th>檔案</th><th>內容</th></tr>
+<tr><td><code>js/lib/importparse.js</code></td>
+    <td>編碼判斷、CSV 解析、以股票代號為錨點抽出持股列、欄位建議、多頁合併</td></tr>
+<tr><td><code>js/views/stockimport.js</code></td>
+    <td>貼上／上傳 → 欄位對應 → 可編輯預覽 → 匯入</td></tr>
+<tr><td><code>tests/importparse.test.js</code></td><td>35 項測試</td></tr>
+</table>
+<p class="muted">
+兩條路（貼上文字、上傳 CSV）共用同一套流程，差別只在資料怎麼進來。
+</p>
+
+<h3>8.4 三個關鍵設計</h3>
+<div class="note">
+<strong>一定要有預覽。</strong>各券商排版差異極大，自動判斷一定有猜錯的時候。
+猜錯了使用者看得到並能改；默默寫進錯誤的成本價，則會一路污染之後所有損益數字，
+而且很難回頭找出原因。因此解析後一律顯示可編輯的預覽表，確認才寫入。
+</div>
+<div class="note">
+<strong>重複的股票不自動相加。</strong>最常見的原因是不小心貼了同一頁兩次，
+自動相加會讓股數憑空翻倍且很難察覺。預設只保留一筆並標記出來，
+由使用者決定 &mdash; 若真的是同一檔放在兩家券商，按下按鈕才合併。
+</div>
+<div class="note">
+<strong>合併走加權平均。</strong>1000 股成本 600 與 100 股成本 900 合起來
+不是 750（簡單平均），而是 627.27。取簡單平均會讓成本高估，之後所有損益跟著錯。
+</div>
+
+<h3>8.5 過程中修掉的三個問題</h3>
+
+<div class="bug">
+<h3>問題一：千分位逗號讓純文字被誤判成 CSV</h3>
+<dl>
+  <dt>現象</dt><dd><code>2330 台積電 1,000 600.00</code> 解析出 0 筆</dd>
+  <dt>原因</dt><dd>用「有沒有逗號」判斷是不是 CSV，而庫存的股數幾乎一定帶千分位。
+      整行被從逗號切成 <code>2330 台積電 1</code> 與 <code>000 600.00</code>，代號就再也找不到</dd>
+  <dt>修正</dt><dd>先把 <code>\d,\d{3}</code> 的千分位剝掉再判斷。
+      刻意不用 lookbehind 寫法 &mdash; 舊版 iOS Safari 不支援，
+      而那是語法錯誤，會讓整個檔案載入失敗而不只是這個函式壞掉</dd>
+</dl>
+</div>
+
+<div class="bug">
+<h3>問題二：我的修正根本沒套用，而且沒有任何錯誤訊息</h3>
+<dl>
+  <dt>現象</dt><dd>改完之後測試結果一模一樣</dd>
+  <dt>原因</dt><dd>用 Python 的 <code>str.replace</code> 改檔案，字串沒對上時
+      <strong>不會拋錯也不會有任何徵兆</strong>，只是安靜地什麼都沒做，
+      而我在後面印了「已修正」</dd>
+  <dt>修正</dt><dd>改用會在找不到目標時直接失敗的編輯方式；
+      後續所有以腳本改檔的地方都加上 <code>assert</code></dd>
+</dl>
+</div>
+
+<div class="bug">
+<h3>問題三：合併後改欄位對應會靜默算錯</h3>
+<dl>
+  <dt>原因</dt><dd>合併後的列只保留第一批的 <code>numbers</code>，
+      若此時更改欄位對應而拿它重算，會得到錯的股數與成本，畫面上看不出異常</dd>
+  <dt>修正</dt><dd>記住「已合併」狀態，改對應時從原始批次重新合併；
+      又貼了新的一頁時讓合併狀態失效</dd>
+</dl>
+</div>
+
+<h3>8.6 驗證</h3>
+<table>
+<tr><th>項目</th><th>結果</th></tr>
+<tr><td>匯入解析測試</td><td><span class="pill ok">35 / 35</span></td></tr>
+<tr><td>全部單元測試</td><td><span class="pill ok">142 / 142</span></td></tr>
+<tr><td>券商截圖的斷行格式</td><td><span class="pill ok">代號與數字分兩行仍正確接起來</span></td></tr>
+<tr><td>標題列與「合計」等雜訊</td><td><span class="pill ok">自動略過</span></td></tr>
+<tr><td>欄位自動判斷</td><td><span class="pill ok">股數／成本價／現價三欄全中</span></td></tr>
+<tr><td>多頁累積</td><td><span class="pill ok">兩批共 3 檔</span></td></tr>
+<tr><td>重複合併</td><td><span class="pill ok">1000@600 + 100@900 → 1100 股 @627.27</span></td></tr>
+<tr><td>實際匯入</td><td><span class="pill ok">3 檔，成本 971,247、市值 1,470,000</span></td></tr>
+<tr><td>Big5 CSV</td><td><span class="pill ok">表頭中文正確解碼</span></td></tr>
+</table>
+</section>
+
+<section>
+<h2>9. 待辦</h2>
+<ul>
   <li>股票模組<strong>第三階段</strong>：FinMind 自動抓價（預設關閉）＋自動更新證券帳戶估值</li>
   <li>股票模組<strong>第四階段</strong>：持股佔比、產業分布、個股損益、市值趨勢等圖表</li>
   <li>介面改版後記得重跑 <code>python tools/make_demo_video.py</code> 更新教學影片</li>
