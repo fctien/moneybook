@@ -274,11 +274,26 @@ export function createStocksSection() {
           el('button.btn.btn--primary', {
             type: 'button',
             onClick: async () => {
-              const symbol = f.symbol.value.trim().toUpperCase();
+              // 送出時再查一次。輸入時的自動帶入是非同步的，
+              // 使用者打完名稱馬上按加入時，代號欄可能還沒填好 ——
+              // 只靠即時帶入的話，這一按就會被擋下來說「請輸入股票代號」。
+              let symbol = f.symbol.value.trim().toUpperCase();
+              const typedName = f.name.value.trim();
+              if (!symbol && typedName) {
+                const { nameToSymbol } = await import('../lib/stocklookup.js');
+                symbol = nameToSymbol(typedName) ?? '';
+                if (symbol) f.symbol.value = symbol;
+              }
+
               const shares = Number(f.shares.value);
               const cost = parseAmount(f.cost.value);
 
-              if (!symbol) return toast('請輸入股票代號', 'error');
+              if (!symbol) {
+                return toast(
+                  typedName ? `查不到「${typedName}」，請直接輸入股票代號` : '請輸入股票代號',
+                  'error', 3600,
+                );
+              }
               if (!Number.isInteger(shares) || shares <= 0) return toast('股數要是大於 0 的整數', 'error');
               if (cost === null || cost <= 0) return toast('請輸入每股平均成本', 'error');
 
