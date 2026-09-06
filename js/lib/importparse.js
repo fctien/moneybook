@@ -191,6 +191,9 @@ const NOISE = new Set([
   '商品', '股票', '名稱', '股票名稱', '交易別', '庫存數量', '可下單數量',
   '現價', '市值', '成本', '成本價', '均價', '參考市值', '損益', '未實現損益',
   '合計', '小計', '總計', '總市值', '股數',
+  // 幣別欄的「值」。這些和欄名一樣要濾掉 —— 漏掉的話，
+  // 「一個欄位一行」的排版會被「台幣」切成兩半，每一列都拆散。
+  '台幣', '新台幣', '美金', '美元', '人民幣', '港幣', '日圓', '日幣', '歐元',
 ]);
 
 /**
@@ -219,12 +222,16 @@ function regroupFlattened(lines, lookup) {
   for (const line of lines) for (const t of line) flat.push(String(t).trim());
   if (flat.length < 6) return null;
 
-  const isAnchor = (t) => {
-    if (NOISE.has(t) || TEXT_HEADERS.has(t)) return false;
-    if (toNumber(t) !== null) return false;
-    if (SYMBOL_RE.test(t)) return true;
-    return Boolean(lookup && lookup(t));
-  };
+  // 只要是「不是數字、也不是已知雜訊或欄名」的詞就當錨點，
+  // 就算查不到是哪一檔也一樣。
+  // 查不到就不當錨點的話，那一列的數字會被併進前一檔，
+  // 前一檔的欄位數因此對不上，最後整批都會被判定為不可靠而放棄 ——
+  // 一個沒收錄的代號拖垮六十幾檔，代價太高。
+  const isAnchor = (t) => !NOISE.has(t)
+    && !TEXT_HEADERS.has(t)
+    // 表頭的欄名（即時數量、持有成本…）也要排除，否則表頭本身會被當成一堆股票
+    && !HEADER_FIELD.has(t)
+    && toNumber(t) === null;
 
   const anchors = [];
   flat.forEach((t, i) => { if (isAnchor(t)) anchors.push(i); });
@@ -237,21 +244,80 @@ function regroupFlattened(lines, lookup) {
     const nums = [];
     for (let i = from + 1; i < to; i += 1) {
       const n = toNumber(flat[i]);
-      if (n !== null) nums.push(flat[i]);
+      if (n !== null) nums.push(n);
     }
-    rows.push([flat[from], ...nums]);
+    rows.push({ name: flat[from], numbers: nums });
   }
 
-  // 每一列的數字個數要一致，否則代表切段不可靠，寧可不處理
-  const counts = rows.map((r) => r.length - 1);
-  const width = counts[0];
-  if (!width || counts.some((c) => c !== width)) return null;
+  // 以「最常見的欄位數」為準。要求每一列完全一致太脆弱 ——
+  // 辨識時漏掉一格空白儲存格，整批就報廢了。
+  const counts = rows.map((r) => r.numbers.length);
+  const width = modeOf(counts);
+  if (!width) return null;
+  // 連一半的列都對不上就別硬做
+  if (counts.filter((c) => c === width).length < rows.length / 2) return null;
 
   // 錨點之前的就是表頭；濾掉文字欄後剩下的即為數字欄的欄名
   const headerTokens = flat.slice(0, anchors[0]).filter((t) => !TEXT_HEADERS.has(t));
   const header = headerTokens.length === width ? headerTokens : null;
 
-  return { lines: rows, header };
+  // 欄位數不足的列：用「股數 × 現價 ＝ 市值」把缺的那一格補回來。
+  // 只有在「恰好一種補法算得通」時才採用 —— 有兩種以上可能就無從判斷，
+  // 硬選一個會讓數字看起來正常卻是錯的。
+  const fixed = rows.map((r) => (r.numbers.length === width ? r : realign(r, width, header)));
+
+  return { rows: fixed, header, width };
+}
+
+/** 出現次數最多的數值 */
+function modeOf(list) {
+  const count = new Map();
+  for (const v of list) count.set(v, (count.get(v) ?? 0) + 1);
+  let best = 0;
+  let bestN = 0;
+  for (const [v, n] of count) if (n > bestN || (n === bestN && v > best)) { best = v; bestN = n; }
+  return best;
+}
+
+/** 表頭裡代表「市值」的欄名，用來驗證欄位有沒有對齊 */
+const MARKET_VALUE_HEADERS = new Set(['市值', '參考市值']);
+
+/**
+ * 欄位數不足的列，試著找出缺的是哪一格。
+ *
+ * 驗證方式是「股數 × 現價 ＝ 市值」—— 這三欄同時存在時，
+ * 只有正確的補法才算得通。恰好一種補法通過才採用；
+ * 有兩種以上或都不通過，就維持原樣讓使用者自己確認。
+ */
+function realign(row, width, header) {
+  const nums = row.numbers;
+  const missing = width - nums.length;
+  // 補不了就一定要標記出來。欄位數比別人少卻照樣按位置對應，
+  // 這一列的成本會安靜地跑到別的欄位去。
+  if (!header || missing !== 1) return { ...row, incomplete: true };
+
+  const idxOf = (pred) => header.findIndex((h) => pred(String(h).trim()));
+  const iShares = idxOf((h) => HEADER_FIELD.get(h) === FIELD.SHARES);
+  const iPrice = idxOf((h) => HEADER_FIELD.get(h) === FIELD.PRICE);
+  const iValue = idxOf((h) => MARKET_VALUE_HEADERS.has(h));
+  if (iShares < 0 || iPrice < 0 || iValue < 0) return row;
+
+  const fits = [];
+  for (let gap = 0; gap < width; gap += 1) {
+    const aligned = [];
+    let k = 0;
+    for (let c = 0; c < width; c += 1) aligned.push(c === gap ? null : nums[k++]);
+
+    const sh = aligned[iShares];
+    const pr = aligned[iPrice];
+    const mv = aligned[iValue];
+    if (sh == null || pr == null || mv == null || mv === 0) continue;
+    if (Math.abs(sh * pr - mv) / Math.abs(mv) < 0.01) fits.push(aligned);
+  }
+
+  // 空位保留為 null：抽掉的話後面所有欄位都會往前移一格
+  if (fits.length !== 1) return { ...row, incomplete: true };
+  return { ...row, numbers: fits[0], realigned: true };
 }
 
 /** 取出所有可能是股票名稱的字串，依出現順序排列 */
@@ -327,8 +393,26 @@ export function extractHoldings(text, opts = {}) {
   if (lines.length >= 6 && single >= lines.length * 0.7) {
     const flat = regroupFlattened(lines, lookup);
     if (flat) {
-      lines = flat.lines;
-      header = flat.header;
+      for (const r of flat.rows) {
+        const name = r.name;
+        let symbol = SYMBOL_RE.test(name) ? name : (lookup ? lookup(name) : null);
+        // 查不到但看起來像代號（例如券商自用的 YY0047）就照原樣採用；
+        // 完全認不出來才回報，這一列仍會出現在預覽裡讓使用者補代號
+        if (!symbol && /^[A-Za-z0-9]{3,12}$/.test(name)) symbol = name.toUpperCase();
+        if (!symbol) { unresolved.push(name); continue; }
+
+        rows.push({
+          symbol,
+          name: SYMBOL_RE.test(name) ? '' : name,
+          numbers: r.numbers,
+          numberAt: r.numbers.map((_, i) => i),
+          tokens: [name, ...r.numbers],
+          resolvedBy: SYMBOL_RE.test(name) ? 'code' : 'name',
+          incomplete: Boolean(r.incomplete),
+          realigned: Boolean(r.realigned),
+        });
+      }
+      return { rows, skipped, unresolved, header: flat.header, layoutLost: false };
     }
   }
 

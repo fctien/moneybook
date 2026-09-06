@@ -299,6 +299,14 @@ export function openStockImport({ onDone } = {}) {
 
       // 券商的庫存畫面多半沒有成本價，先講清楚會怎麼處理，
       // 使用者才不會以為是自己貼漏了
+      const incomplete = stateIn.rows.filter((r) => r.incomplete);
+      if (incomplete.length) {
+        wrap.append(el('div.hint.hint--warn', {
+          text: `${incomplete.map((r) => r.name || r.symbol).join('、')} 的欄位數與其他列不一致`
+            + '（辨識時可能漏掉了空白格），數字沒有自動填入，請自行確認後補上。',
+        }));
+      }
+
       const noCost = (r) => !(r.avgCost != null || r.totalCost != null);
       if (stateIn.rows.some((r) => !r.skip && noCost(r))) {
         wrap.append(el('p.hint', {
@@ -461,10 +469,19 @@ export function openStockImport({ onDone } = {}) {
             const i = idx(field);
             return i >= 0 ? row.numbers?.[i] ?? null : null;
           };
-          row.shares = pick(FIELD.SHARES);
-          row.avgCost = pick(FIELD.AVG_COST);
-          row.totalCost = pick(FIELD.TOTAL_COST);
-          row.price = pick(FIELD.PRICE);
+          // 欄位數與其他列不一致的，不按位置對應 ——
+          // 少一格卻照樣對，成本會安靜地跑到別的欄位去。留白讓使用者自己填。
+          if (row.incomplete) {
+            row.shares = null;
+            row.avgCost = null;
+            row.totalCost = null;
+            row.price = null;
+          } else {
+            row.shares = pick(FIELD.SHARES);
+            row.avgCost = pick(FIELD.AVG_COST);
+            row.totalCost = pick(FIELD.TOTAL_COST);
+            row.price = pick(FIELD.PRICE);
+          }
           out.push(row);
         }
       }

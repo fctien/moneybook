@@ -500,3 +500,116 @@ test('一個欄位一行：每列數字個數不一致時不硬做', () => {
   assert.ok(r.rows.every((x) => x.numbers.length !== 2 || x.symbol === '2330'),
     '不該把兩檔的數字混在一起');
 });
+
+// ── 實際資料裡的三個異常 ────────────────────────────────────
+
+const MESSY = `下單
+杏一
+集保
+73
+
+73 51.8
+3,781.4
+
+台幣
+下單
+遠傳
+集保
+244
+244
+104
+25,376
+42,630
+台幣
+下單
+無敵
+集保
+1
+1
+11.8
+11.8
+0
+台幣
+下單
+YY0047
+集保
+21,700
+21,700
+0
+0
+0
+台幣
+下單
+老四川
+興櫃
+52
+52
+20.8
+1,081.6
+0
+台幣`;
+
+const MESSY_WITH_HEADER = `單
+商品
+
+種類 即時數量 可下單數 現價
+
+
+市值
+持有成本
+幣別
+${MESSY}`;
+
+test('「台幣」是欄位的值，不能被當成股票而把每一列切成兩半', () => {
+  const r = extractHoldings(MESSY, opts);
+  assert.equal(r.rows.length, 5, '五檔就是五列');
+  assert.ok(!r.rows.some((x) => x.numbers.length === 0), '不該有整列沒有數字的');
+});
+
+test('沒收錄的代號仍當成一列，不會把數字併進前一檔', () => {
+  // 一個沒收錄的代號拖垮整批，代價太高
+  const r = extractHoldings(MESSY, opts);
+  const yy = r.rows.find((x) => x.symbol === 'YY0047');
+  assert.ok(yy, '查不到也要保留這一列');
+  assert.deepEqual(yy.numbers, [21700, 21700, 0, 0, 0]);
+
+  const prev = r.rows.find((x) => x.symbol === '9940' || x.name === '信義');
+  if (prev) assert.equal(prev.numbers.length, 5, '前一檔的欄位數不該被撐大');
+});
+
+test('有表頭時，缺一格的列用「股數 × 現價 ＝ 市值」補回來', () => {
+  // 杏一：73 股 × 51.8 元 = 3,781.4，因此缺的是最後的「持有成本」
+  const r = extractHoldings(MESSY_WITH_HEADER, opts);
+  const row = r.rows.find((x) => x.symbol === '4175');
+  assert.deepEqual(row.numbers, [73, 73, 51.8, 3781.4, null]);
+  assert.equal(row.realigned, true);
+  assert.ok(!row.incomplete);
+});
+
+test('沒有表頭而補不回來時，標記為欄位數不一致', () => {
+  // 無從得知缺的是哪一欄，硬按位置對應會讓成本跑到別的欄位
+  const r = extractHoldings(MESSY, opts);
+  const row = r.rows.find((x) => x.symbol === '4175');
+  assert.equal(row.numbers.length, 4);
+  assert.equal(row.incomplete, true);
+});
+
+test('補位後的欄位對應仍然正確，其餘各檔照常匯入', () => {
+  const r = extractHoldings(MESSY_WITH_HEADER, opts);
+  const m = suggestMapping(r.rows, r.header);
+  assert.deepEqual(m, [FIELD.SHARES, FIELD.IGNORE, FIELD.PRICE, FIELD.IGNORE, FIELD.TOTAL_COST]);
+
+  const resolved = r.rows.map((x) => ({
+    ...x,
+    shares: x.numbers[m.indexOf(FIELD.SHARES)],
+    price: x.numbers[m.indexOf(FIELD.PRICE)],
+    totalCost: x.numbers[m.indexOf(FIELD.TOTAL_COST)],
+  }));
+  const out = rowsToTrades(resolved, m, '2026-09-06');
+  assert.equal(out.errors.length, 0);
+  assert.equal(out.trades.length, 5);
+
+  const by = Object.fromEntries(out.trades.map((t) => [t.symbol, t]));
+  assert.equal(by['4904'].shares * by['4904'].price + by['4904'].fee, 4_263_000, '遠傳成本 42,630');
+  assert.equal(by['4175'].costUnknown, true, '杏一的成本那一格本來就沒有值');
+});
