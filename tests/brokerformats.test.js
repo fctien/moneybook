@@ -132,6 +132,102 @@ test('格式 B：查不到的代號會回報，不會無聲消失', () => {
   assert.deepEqual(unresolved, ['YY0047']);
 });
 
+// ── 完整欄位的兩種畫面（含成本）──────────────────────────────
+
+// 即時庫存（完整）：下單｜商品｜種類｜即時數量｜可下單數｜現價｜市值｜持有成本｜幣別
+const FULL_A = `下單 商品 種類 即時數量 可下單數 現價 市值 持有成本 幣別
+下單 主動凱基台灣 集保 107,000 107,000 9.73 1,041,110 935,431 台幣
+下單 元大台灣50 集保 4,000 4,000 107.9 431,600 203,462 台幣
+下單 台積電 集保 1,000 1,000 2,410 2,410,000 848,725 台幣`;
+
+// 未實現損益（完整）：13 欄，含成本金額、平均單價、損益、報酬率、無成本數量
+const FULL_B = `商品 交易別 庫存數量 現價 市值 成本數量 成本金額 平均單價 利息費用 損益 報酬率 無成本數量 幣別
+主動凱基台灣 現股 107,000 9.73 1,041,110 107,000 935,431 8.7423 0 103,155 11.03% 0 台幣
+元大美債20年 現股 24,000 25.78 618,720 24,000 685,205 28.5502 0 -67,366 -9.83% 0 台幣
+友訊 現股 173 19.55 3,382 0 0 0 0 3,352 0.00% 173 台幣
+大立光 現股 11 7,400 81,400 11 37,806 3,436.9091 0 43,235 114.36% 0 台幣
+中鋼 現股 1,000 19.1 19,100 1,000 36,831 36.831 0 -17,815 -48.37% 0 台幣`;
+
+const tradesOf = (text) => {
+  const r = extractHoldings(text, opts);
+  const m = suggestMapping(r.rows, r.header);
+  return { ...rowsToTrades(r.rows, m, '2026-09-06'), mapping: m, header: r.header };
+};
+
+test('完整版即時庫存：認得表頭，持有成本對到成本總額', () => {
+  const { mapping, header } = tradesOf(FULL_A);
+  assert.ok(header, '要偵測到表頭');
+  assert.deepEqual(mapping, [
+    FIELD.SHARES, FIELD.IGNORE, FIELD.PRICE, FIELD.IGNORE, FIELD.TOTAL_COST,
+  ]);
+});
+
+test('完整版即時庫存：總成本精確還原，不因四捨五入失真', () => {
+  // 935,431 / 107,000 = 8.74234…，直接取到分再乘回去會少 251 元。
+  // 餘數放進 fee，總成本才能精確還原。
+  const { trades } = tradesOf(FULL_A);
+  const t = trades.find((x) => x.symbol === '00407A');
+  assert.equal(t.shares * t.price + t.fee, 93_543_100, '總成本要剛好是 935,431 元');
+  assert.equal(t.costUnknown, false);
+});
+
+test('完整版未實現損益：兩種成本欄並存時取「成本金額」', () => {
+  // 平均單價是券商四捨五入後的顯示值，成本金額才是精確的原始數字
+  const { mapping } = tradesOf(FULL_B);
+  assert.ok(mapping.includes(FIELD.TOTAL_COST));
+  assert.ok(!mapping.includes(FIELD.AVG_COST), '平均單價要讓位給成本金額');
+});
+
+test('完整版未實現損益：成本與均價與券商完全一致', () => {
+  const { trades } = tradesOf(FULL_B);
+  const positions = computePositions(trades.map((t, i) => ({ ...t, tax: 0, amount: 0, createdAt: i })));
+  const by = Object.fromEntries(positions.map((p) => [p.symbol, p]));
+
+  // [代號, 券商成本金額, 券商平均單價]
+  for (const [sym, cost, avg] of [
+    ['00407A', 935_431, 8.7423],
+    ['00679B', 685_205, 28.5502],
+    ['3008', 37_806, 3436.9091],
+    ['2002', 36_831, 36.831],
+  ]) {
+    assert.equal(by[sym].totalCost, Math.round(cost * 100), `${sym} 成本要一致`);
+    const mine = by[sym].totalCost / by[sym].shares / 100;
+    assert.ok(Math.abs(mine - avg) < 0.0001, `${sym} 均價 ${mine} 應為 ${avg}`);
+  }
+});
+
+test('全部由配股取得的零成本部位，不是「成本待補」', () => {
+  // 友訊：成本數量 0、成本金額 0、無成本數量 173 —— 成本真的是零。
+  // 「有成本欄位但值為 0」與「根本沒有成本欄位」必須分開處理。
+  const { trades } = tradesOf(FULL_B);
+  const t = trades.find((x) => x.symbol === '2332');
+  assert.equal(t.shares, 173);
+  assert.equal(t.price, 0);
+  assert.equal(t.costUnknown, false, '有成本欄位且值為 0，是真的零成本');
+});
+
+test('高精度均價（大立光 3,436.9091）不會被截斷', () => {
+  const { trades } = tradesOf(FULL_B);
+  const t = trades.find((x) => x.symbol === '3008');
+  assert.equal(t.shares * t.price + t.fee, 3_780_600, '總成本 37,806 元');
+});
+
+test('負數與百分比欄位不會讓欄位錯位', () => {
+  // 「-9.83%」若被判定為非數字而丟掉，後面所有欄位都會位移
+  const { trades } = tradesOf(FULL_B);
+  const t = trades.find((x) => x.symbol === '00679B');
+  assert.equal(t.shares, 24_000);
+  assert.equal(t.shares * t.price + t.fee, 68_520_500);
+});
+
+test('沒有表頭時仍能靠數值特徵處理', () => {
+  const noHeader = `下單 主動凱基台灣 集保 107,000 107,000 9.73 1,041,110 935,431 台幣`;
+  const r = extractHoldings(noHeader, opts);
+  const m = suggestMapping(r.rows, r.header);
+  assert.equal(r.header, null);
+  assert.ok(m.includes(FIELD.SHARES), '至少要認出股數');
+});
+
 // ── 成本待補的部位不會顯示假的損益 ──────────────────────────
 
 test('成本待補的部位算得出市值，但不顯示損益', () => {

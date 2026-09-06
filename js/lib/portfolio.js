@@ -84,7 +84,12 @@ export function validateTrade(input) {
     if (!Number.isInteger(shares) || shares <= 0) {
       return { ok: false, error: '股數要是大於 0 的整數' };
     }
-    if (price <= 0 && !costUnknown) return { ok: false, error: '價格要大於 0' };
+    // 期初持股的成本可以是 0：整筆都由無償配股取得時，成本真的就是零
+    // （券商的「無成本數量」欄位就是在講這件事）。
+    // 買進與賣出仍然要求價格大於 0。
+    if (price <= 0 && t.action !== ACTION.OPENING) {
+      return { ok: false, error: '價格要大於 0' };
+    }
   }
 
   return {

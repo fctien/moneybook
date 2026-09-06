@@ -21,7 +21,8 @@ import * as store from '../store.js';
 const FIELD_LABEL = {
   [FIELD.IGNORE]: '不使用',
   [FIELD.SHARES]: '股數',
-  [FIELD.AVG_COST]: '成本價',
+  [FIELD.AVG_COST]: '每股成本',
+  [FIELD.TOTAL_COST]: '成本總額',
   [FIELD.PRICE]: '現價',
 };
 
@@ -70,7 +71,7 @@ export function openStockImport({ onDone } = {}) {
 
       const addText = (text) => {
         // 券商庫存畫面常常只有名稱沒有代號，交給查表補上
-        const { rows, skipped, unresolved } = extractHoldings(text, { lookup: nameToSymbol });
+        const { rows, skipped, unresolved, header } = extractHoldings(text, { lookup: nameToSymbol });
         if (unresolved.length) stateIn.unresolved.push(...unresolved);
 
         if (!rows.length) {
@@ -83,8 +84,9 @@ export function openStockImport({ onDone } = {}) {
           if (unresolved.length) render();
           return;
         }
-        // 這一批的欄位對應只依這一批的資料推斷
-        stateIn.batches.push({ rows, mapping: suggestMapping(rows) });
+        // 這一批的欄位對應只依這一批的資料推斷。
+        // 有表頭就照欄名對，比從數值特徵猜可靠得多。
+        stateIn.batches.push({ rows, header, mapping: suggestMapping(rows, header) });
         recompute();
         haptic(12);
         toast(`加入 ${rows.length} 檔`, 'success');
@@ -240,7 +242,8 @@ export function openStockImport({ onDone } = {}) {
 
       // 券商的庫存畫面多半沒有成本價，先講清楚會怎麼處理，
       // 使用者才不會以為是自己貼漏了
-      if (stateIn.rows.some((r) => !r.skip && !(r.avgCost > 0))) {
+      const noCost = (r) => !(r.avgCost != null || r.totalCost != null);
+      if (stateIn.rows.some((r) => !r.skip && noCost(r))) {
         wrap.append(el('p.hint', {
           text: '成本價留白也可以匯入，該檔會標記為「成本待補」——'
             + '算得出市值，但不會顯示損益（用 0 當成本會得到荒謬的報酬率）。'
@@ -290,7 +293,9 @@ export function openStockImport({ onDone } = {}) {
             : null,
           el('div.import-row__fields', {}, [
             labelled('股數', num('shares', '必填')),
-            labelled('成本價', num('avgCost', '沒有可留白')),
+            row.totalCost != null
+              ? labelled('成本總額', num('totalCost', '沒有可留白'))
+              : labelled('每股成本', num('avgCost', '沒有可留白')),
             labelled('現價', num('price', '選填')),
           ]),
         ]));
@@ -394,6 +399,7 @@ export function openStockImport({ onDone } = {}) {
           };
           row.shares = pick(FIELD.SHARES);
           row.avgCost = pick(FIELD.AVG_COST);
+          row.totalCost = pick(FIELD.TOTAL_COST);
           row.price = pick(FIELD.PRICE);
           out.push(row);
         }

@@ -20,9 +20,29 @@ const SYMBOL_RE = /^\d{4,6}[A-Z]?$/;
 export const FIELD = {
   IGNORE: 'ignore',
   SHARES: 'shares',
-  AVG_COST: 'avgCost',
+  AVG_COST: 'avgCost',     // 每股平均成本
+  TOTAL_COST: 'totalCost', // 成本總額（券商多半給這個，而不是每股）
   PRICE: 'price',
 };
+
+/**
+ * 券商表頭的欄名對照。有表頭就直接照欄名對應，
+ * 這比從數值特徵猜可靠得多 —— 猜錯了畫面上看不出來。
+ */
+const HEADER_FIELD = new Map([
+  ['庫存數量', FIELD.SHARES], ['即時數量', FIELD.SHARES], ['股數', FIELD.SHARES],
+  ['庫存股數', FIELD.SHARES], ['持有數量', FIELD.SHARES],
+  ['現價', FIELD.PRICE], ['市價', FIELD.PRICE], ['成交價', FIELD.PRICE], ['參考價', FIELD.PRICE],
+  ['平均單價', FIELD.AVG_COST], ['成本單價', FIELD.AVG_COST], ['成本價', FIELD.AVG_COST],
+  ['均價', FIELD.AVG_COST], ['買進均價', FIELD.AVG_COST],
+  ['成本金額', FIELD.TOTAL_COST], ['持有成本', FIELD.TOTAL_COST], ['總成本', FIELD.TOTAL_COST],
+  // 以下是刻意標成不使用的：市值與損益都能由前面幾欄推算，
+  // 讓它們參與對應只會增加猜錯的機會
+  ['市值', FIELD.IGNORE], ['參考市值', FIELD.IGNORE], ['可下單數', FIELD.IGNORE],
+  ['可下單數量', FIELD.IGNORE], ['成本數量', FIELD.IGNORE], ['利息費用', FIELD.IGNORE],
+  ['損益', FIELD.IGNORE], ['未實現損益', FIELD.IGNORE], ['報酬率', FIELD.IGNORE],
+  ['無成本數量', FIELD.IGNORE], ['幣別', FIELD.IGNORE], ['漲跌', FIELD.IGNORE],
+]);
 
 // --------------------------------------------------------------------------
 // 編碼
@@ -134,7 +154,9 @@ export function parseCSV(text, delimiter = null) {
 export function toNumber(token) {
   if (token == null) return null;
   const cleaned = String(token)
-    .replace(/[,\s＄$元股]/g, '')
+    // 百分比也要當成數字解析。若直接判定為「非數字」而丟掉，
+    // 「報酬率」那一欄就會從 numbers 裡消失，後面所有欄位跟著錯位。
+    .replace(/[,\s＄$元股%％]/g, '')
     // 全形數字與小數點
     .replace(/[０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xFEE0))
     .replace(/．/g, '.');
@@ -236,7 +258,17 @@ export function extractHoldings(text, opts = {}) {
   const lookup = typeof opts.lookup === 'function' ? opts.lookup : null;
   const rows = [];
   const unresolved = [];
+  let header = null;
   let skipped = 0;
+
+  // 表頭：整列都是已知欄名的那一行。找到就能直接照欄名對應，
+  // 不必從數值特徵猜 —— 猜錯了畫面上完全看不出來。
+  for (const line of lines) {
+    const toks = line.filter((t) => String(t).trim() !== '');
+    if (toks.length < 3) continue;
+    const known = toks.filter((t) => HEADER_FIELD.has(String(t).trim())).length;
+    if (known >= 3 && known >= Math.floor(toks.length / 3)) { header = toks; break; }
+  }
 
   for (let i = 0; i < lines.length; i += 1) {
     const tokens = lines[i].filter((t) => String(t).trim() !== '');
@@ -275,10 +307,15 @@ export function extractHoldings(text, opts = {}) {
 
     if (!symbol) { skipped += 1; continue; }
 
-    let numbers = tokens
-      .filter((t) => String(t).trim() !== symbol)
-      .map(toNumber)
-      .filter((n) => n !== null);
+    const numbers = [];
+    let numberIndices = [];
+    tokens.forEach((t, idx) => {
+      if (String(t).trim() === symbol) return;
+      const n = toNumber(t);
+      if (n === null) return;
+      numbers.push(n);
+      numberIndices.push(idx);
+    });
 
     // 數字在下一行：截圖辨識常見的斷行方式
     if (!numbers.length && lines[i + 1]) {
@@ -286,7 +323,13 @@ export function extractHoldings(text, opts = {}) {
       // 下一行本身若是另一檔股票就不能借，否則會把兩檔混成一筆
       const nextIsAnother = findSymbol(next) || (lookup && lookup(findName(next, '')));
       if (!nextIsAnother) {
-        numbers = next.map(toNumber).filter((n) => n !== null);
+        numberIndices = [];
+        next.forEach((t, idx) => {
+          const n = toNumber(t);
+          if (n === null) return;
+          numbers.push(n);
+          numberIndices.push(idx);
+        });
         i += 1; // 這一行已經用掉了
       }
     }
@@ -295,11 +338,15 @@ export function extractHoldings(text, opts = {}) {
       symbol,
       name: findName(tokens, symbol),
       numbers,
+      // 數字在原始欄位中的位置。有表頭時要靠它把欄名對上數字欄，
+      // 因為 numbers 已經濾掉了商品名稱、種類、幣別這些非數字欄。
+      numberAt: numberIndices,
+      tokens,
       resolvedBy,
     });
   }
 
-  return { rows, skipped, unresolved };
+  return { rows, skipped, unresolved, header };
 }
 
 /**
@@ -311,7 +358,47 @@ export function extractHoldings(text, opts = {}) {
  * @param {object[]} rows extractHoldings 的結果
  * @returns {string[]} 每個數字欄位對應到的 FIELD
  */
-export function suggestMapping(rows = []) {
+export function suggestMapping(rows = [], header = null) {
+  // 有表頭就照欄名對應。這是最可靠的一條路 ——
+  // 數值特徵的判斷再怎麼小心，遇到沒見過的排版還是會猜錯，
+  // 而猜錯的結果（例如把市值當成股數）在畫面上完全看不出異常。
+  const byHeader = mapByHeader(rows, header);
+  if (byHeader) return byHeader;
+
+  return suggestByShape(rows);
+}
+
+/**
+ * 依表頭欄名產生對應。
+ * numbers 已經濾掉非數字欄，因此要靠 numberAt 把欄名對回數字欄。
+ */
+function mapByHeader(rows, header) {
+  if (!Array.isArray(header) || !header.length) return null;
+
+  const sample = rows.find((r) => Array.isArray(r.numberAt) && r.numberAt.length);
+  if (!sample) return null;
+  // 欄數對不上就不能靠位置對應，寧可退回數值判斷
+  if (sample.tokens?.length !== header.length) return null;
+
+  const mapping = sample.numberAt.map((idx) => {
+    const name = String(header[idx] ?? '').trim();
+    return HEADER_FIELD.get(name) ?? FIELD.IGNORE;
+  });
+
+  // 至少要認出股數才算數，否則這份對應沒有意義
+  if (!mapping.includes(FIELD.SHARES)) return null;
+
+  // 兩種成本欄位同時存在時，留「成本總額」而不是「平均單價」。
+  // 平均單價是券商四捨五入後的顯示值：8.7423 × 107,000 = 935,326，
+  // 但實際成本金額是 935,431，差了 105 元。總額才是精確的原始數字。
+  if (mapping.includes(FIELD.AVG_COST) && mapping.includes(FIELD.TOTAL_COST)) {
+    mapping[mapping.indexOf(FIELD.AVG_COST)] = FIELD.IGNORE;
+  }
+  return mapping;
+}
+
+/** 沒有表頭時，退回用數值特徵判斷 */
+function suggestByShape(rows = []) {
   const width = Math.max(0, ...rows.map((r) => r.numbers.length));
   if (!width) return [];
 
@@ -505,16 +592,34 @@ export function rowsToTrades(rows = [], mapping = [], date) {
 
     const shares = row.shares ?? pick(row, FIELD.SHARES);
     const avgCost = row.avgCost ?? pick(row, FIELD.AVG_COST);
+    const totalCost = row.totalCost ?? pick(row, FIELD.TOTAL_COST);
     const price = row.price ?? pick(row, FIELD.PRICE);
 
     if (!Number.isFinite(shares) || shares <= 0) {
       errors.push(`${row.symbol}：股數不正確`);
       continue;
     }
-    // 成本價缺漏不擋下來 —— 券商的庫存畫面常常只有股數與現價。
-    // 標記成「待補」先把持股建起來，總比整批匯不進去好；
-    // 這種部位不會顯示損益，不會出現憑空編出來的報酬率。
-    const hasCost = Number.isFinite(avgCost) && avgCost > 0;
+
+    const n = Math.round(shares);
+    let priceCents = 0;
+    let feeCents = 0;
+    // 「成本欄位存在但值是 0」與「根本沒有成本欄位」是兩回事。
+    // 前者是真的零成本（全部由配股取得），後者才是待補。
+    let costUnknown = true;
+
+    if (Number.isFinite(avgCost)) {
+      priceCents = Math.round(avgCost * 100);
+      costUnknown = false;
+    } else if (Number.isFinite(totalCost)) {
+      // 券商多半只給成本總額。直接除以股數再四捨五入會失真：
+      // 935,431 / 107,000 = 8.74234…，取到分之後乘回去會少掉 251 元。
+      // 因此把除不盡的餘數放進 fee —— 成本模型本來就是 股數×單價＋費用，
+      // 這樣總成本能精確還原。
+      const totalCents = Math.round(totalCost * 100);
+      priceCents = Math.floor(totalCents / n);
+      feeCents = totalCents - priceCents * n;
+      costUnknown = false;
+    }
 
     trades.push({
       date,
@@ -522,9 +627,10 @@ export function rowsToTrades(rows = [], mapping = [], date) {
       name: row.name ?? '',
       action: 'opening',
       // 金額一律以「分」為單位的整數儲存
-      shares: Math.round(shares),
-      price: hasCost ? Math.round(avgCost * 100) : 0,
-      costUnknown: !hasCost,
+      shares: n,
+      price: priceCents,
+      fee: feeCents,
+      costUnknown,
     });
 
     if (Number.isFinite(price) && price > 0) {

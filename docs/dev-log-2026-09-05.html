@@ -525,7 +525,100 @@
 </section>
 
 <section>
-<h2>11. 待辦</h2>
+<h2>11. 完整欄位的兩種畫面（v1.7.0）</h2>
+<p>
+使用者補上未裁切的截圖後才看到：兩種畫面<strong>其實都有成本</strong>，
+而且欄位遠比先前看到的多。
+</p>
+<table>
+<tr><th>畫面</th><th>成本欄位</th><th>其他欄位</th></tr>
+<tr><td>即時庫存</td><td><strong>持有成本</strong>（總額）</td><td>種類、可下單數、幣別</td></tr>
+<tr><td>未實現損益</td><td><strong>成本金額</strong>（總額）＋<strong>平均單價</strong>（每股）</td>
+    <td>成本數量、利息費用、損益、報酬率、無成本數量、幣別</td></tr>
+</table>
+
+<h3>11.1 改用表頭欄名對應</h3>
+<div class="note">
+兩種畫面都有表頭。與其從數值特徵猜，不如<strong>直接讀欄名</strong> ——
+猜錯的結果（把市值當成股數）在畫面上完全看不出異常，而讀欄名幾乎不會錯。
+沒有表頭時才退回原本的數值判斷。
+</div>
+<p class="muted">
+<code>numbers</code> 已濾掉商品名稱、種類、幣別等非數字欄，因此另外記錄
+<code>numberAt</code>（每個數字在原始欄位中的位置），才能把欄名對回數字欄。
+</p>
+
+<h3>11.2 四個新處理</h3>
+<table>
+<tr><th>情境</th><th>處理</th></tr>
+<tr><td><strong>成本是總額不是每股</strong></td>
+    <td>新增 <code>TOTAL_COST</code> 欄位角色</td></tr>
+<tr><td><strong>總額除以股數會失真</strong></td>
+    <td>935,431 ÷ 107,000 = 8.74234…，取到分再乘回去少 251 元。
+        把餘數放進 <code>fee</code> —— 成本模型本來就是 股數×單價＋費用，總成本因此精確還原</td></tr>
+<tr><td><strong>兩種成本欄並存</strong></td>
+    <td>取「成本金額」而非「平均單價」。後者是券商四捨五入後的顯示值，前者才是原始數字</td></tr>
+<tr><td><strong>百分比與負數欄位</strong></td>
+    <td><code>-9.83%</code> 若被判定為非數字而丟掉，後面所有欄位都會位移。改為剝除 <code>%</code> 後當數字解析</td></tr>
+</table>
+
+<h3>11.3 修掉一個會讓資料無聲消失的問題</h3>
+<div class="bug">
+<h3>零成本的持股在匯入時被丟掉</h3>
+<dl>
+  <dt>個案</dt><dd>友訊 173 股，成本數量 0、成本金額 0、無成本數量 173 &mdash;
+      整筆由無償配股取得，成本真的是零</dd>
+  <dt>原因</dt><dd><code>validateTrade</code> 一律要求價格大於 0，這一筆被擋在寫入之前</dd>
+  <dt>後果</dt><dd>匯入四檔只進去三檔，而且<strong>沒有任何提示</strong>。
+      使用者只會發現「少了一檔」，卻不知道為什麼</dd>
+  <dt>修正</dt><dd>期初持股允許成本為 0（買進與賣出仍要求大於 0）。
+      同時區分「有成本欄位但值為 0」（真的零成本）與「根本沒有成本欄位」（待補）</dd>
+</dl>
+</div>
+
+<h3>11.4 與券商對帳：成本完全一致</h3>
+<table>
+<tr><th>個股</th><th>券商成本金額</th><th>我們算出</th><th>券商平均單價</th><th>我們算出</th></tr>
+<tr><td>主動凱基台灣</td><td>935,431</td><td><span class="pill ok">935,431</span></td><td>8.7423</td><td><span class="pill ok">8.7423</span></td></tr>
+<tr><td>元大美債20年</td><td>685,205</td><td><span class="pill ok">685,205</span></td><td>28.5502</td><td><span class="pill ok">28.5502</span></td></tr>
+<tr><td>大立光</td><td>37,806</td><td><span class="pill ok">37,806</span></td><td>3,436.9091</td><td><span class="pill ok">3,436.9091</span></td></tr>
+<tr><td>中鋼</td><td>36,831</td><td><span class="pill ok">36,831</span></td><td>36.831</td><td><span class="pill ok">36.831</span></td></tr>
+<tr><td>友訊</td><td>0</td><td><span class="pill ok">0</span></td><td>0</td><td><span class="pill ok">0</span></td></tr>
+</table>
+
+<h3>11.5 損益的差異：券商已扣除賣出成本</h3>
+<p>
+損益數字有系統性差距，逐檔比對後可完全解釋 &mdash;
+<strong>券商的未實現損益已經扣掉賣出時要付的手續費與證交稅</strong>：
+</p>
+<table>
+<tr><th>個股</th><th>差額</th><th>對應費率</th></tr>
+<tr><td>中鋼</td><td>84</td><td>手續費 0.1425% ＋ 證交稅 0.3%</td></tr>
+<tr><td>大立光</td><td>359</td><td>同上</td></tr>
+<tr><td>主動凱基台灣</td><td>2,524</td><td>手續費 ＋ 證交稅 <strong>0.1%</strong>（股票 ETF）</td></tr>
+<tr><td>元大美債20年</td><td>881</td><td>手續費，<strong>債券 ETF 免證交稅</strong></td></tr>
+<tr><td>友訊</td><td>30</td><td><strong>最低手續費 20 元</strong> ＋ 稅</td></tr>
+</table>
+<div class="note">
+<strong>目前不實作這個扣除。</strong>證交稅率依商品類別而異（一般股 0.3%、股票 ETF 0.1%、
+債券 ETF 免徵），且隨法規調整。內建一份會過期的稅率表，日後只會安靜地算錯 ——
+這正是本專案一路在避免的那種錯誤。維持「未實現損益＝市值−成本」的定義，
+差異在說明中講清楚即可。
+</div>
+
+<h3>11.6 驗證</h3>
+<table>
+<tr><th>項目</th><th>結果</th></tr>
+<tr><td>真實格式測試</td><td><span class="pill ok">22 / 22</span></td></tr>
+<tr><td>全部單元測試</td><td><span class="pill ok">191 / 191</span></td></tr>
+<tr><td>成本與均價</td><td><span class="pill ok">五檔全部與券商一分不差</span></td></tr>
+<tr><td>兩種完整格式混貼</td><td><span class="pill ok">各批欄位互不干擾，四檔全數匯入</span></td></tr>
+<tr><td>零成本持股</td><td><span class="pill ok">正確匯入，不再無聲消失</span></td></tr>
+</table>
+</section>
+
+<section>
+<h2>12. 待辦</h2>
 <ul>
   <li>股票模組<strong>第三階段</strong>：FinMind 自動抓價（預設關閉）＋自動更新證券帳戶估值</li>
   <li>股票模組<strong>第四階段</strong>：持股佔比、產業分布、個股損益、市值趨勢等圖表</li>

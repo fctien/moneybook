@@ -265,6 +265,22 @@ test('validateTrade 對股利有各自的規則', () => {
   assert.match(validateTrade({ ...s, shares: 0 }).error, /配股/);
 });
 
+test('期初持股的成本可以是 0（整筆由無償配股取得）', () => {
+  // 券商的「無成本數量」欄位就是在講這種持股。擋掉的話，
+  // 這一檔會在匯入時無聲消失，使用者只會發現「少了一檔」卻不知道為什麼。
+  const r = validateTrade({
+    date: '2026-09-06', symbol: '2332', action: ACTION.OPENING, shares: 173, price: 0,
+  });
+  assert.equal(r.ok, true);
+  assert.equal(r.value.price, 0);
+});
+
+test('買進與賣出仍然要求價格大於 0', () => {
+  const base = { date: '2026-09-06', symbol: '2330', shares: 100, price: 0 };
+  assert.match(validateTrade({ ...base, action: ACTION.BUY }).error, /價格/);
+  assert.match(validateTrade({ ...base, action: ACTION.SELL }).error, /價格/);
+});
+
 test('空輸入不會拋例外', () => {
   assert.equal(validateTrade(null).ok, false);
   assert.equal(validateTrade({}).ok, false);

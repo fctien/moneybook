@@ -353,7 +353,7 @@ test('rowsToTrades 產生期初交易與報價，金額轉為分', () => {
   assert.equal(out.trades.length, 1);
   assert.deepEqual(out.trades[0], {
     date: '2026-09-06', symbol: '2330', name: '台積電',
-    action: 'opening', shares: 1000, price: 60000, costUnknown: false,
+    action: 'opening', shares: 1000, price: 60000, fee: 0, costUnknown: false,
   });
   assert.deepEqual(out.quotes, [{ symbol: '2330', close: 80000 }]);
   assert.deepEqual(out.errors, []);
