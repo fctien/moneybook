@@ -157,15 +157,38 @@ export function findSymbol(tokens) {
   return null;
 }
 
-/** 取出中文或英文的股票名稱（不含代號與數字） */
-function findName(tokens, symbol) {
+/**
+ * 券商庫存畫面上會出現、但不是股票名稱的欄位。
+ *
+ * 實際截圖裡「下單」按鈕排在商品名稱前面，「現股」「集保」排在後面。
+ * 不濾掉的話，第一個非數字欄位會被當成股票名稱，整批就解析不出東西。
+ */
+const NOISE = new Set([
+  '下單', '買進', '賣出', '現買', '現賣',
+  '現股', '集保', '興櫃', '零股', '融資', '融券', '借券', '定期定額',
+  '商品', '股票', '名稱', '股票名稱', '交易別', '庫存數量', '可下單數量',
+  '現價', '市值', '成本', '成本價', '均價', '參考市值', '損益', '未實現損益',
+  '合計', '小計', '總計', '總市值', '股數',
+]);
+
+/** 取出所有可能是股票名稱的字串，依出現順序排列 */
+function nameCandidates(tokens, symbol) {
+  const out = [];
   for (const t of tokens) {
     const clean = String(t).replace(/[（(]\d{4,6}[A-Z]?[）)]/g, '').trim();
     if (!clean || clean === symbol) continue;
     if (toNumber(clean) !== null) continue;
-    if (/[一-鿿]|[A-Za-z]{2,}/.test(clean)) return clean;
+    if (!/[一-鿿]|[A-Za-z]{2,}/.test(clean)) continue;
+    out.push(clean);
   }
-  return '';
+  return out;
+}
+
+/** 取出中文或英文的股票名稱（不含代號與數字） */
+function findName(tokens, symbol) {
+  const cands = nameCandidates(tokens, symbol);
+  // 優先挑不在雜訊清單裡的，全都是雜訊時才退回第一個
+  return cands.find((c) => !NOISE.has(c)) ?? cands[0] ?? '';
 }
 
 /**
@@ -226,13 +249,23 @@ export function extractHoldings(text, opts = {}) {
     // 查不到就記進 unresolved 而不是靜靜丟掉 —— 使用者要能分辨
     // 「這一列沒讀到」與「這一列讀到了但認不出是哪一檔」。
     if (!symbol && lookup) {
-      const candidate = findName(tokens, '');
-      if (candidate) {
-        const hit = lookup(candidate);
-        if (hit) {
-          symbol = hit;
-          resolvedBy = 'name';
-        } else if (looksLikeDataRow(tokens, lines[i + 1])) {
+      // 逐一試每個非數字欄位，第一個查得到的就是股票名稱。
+      // 這比「取第一個非數字欄位」穩健得多 —— 券商在名稱前後各塞了
+      // 「下單」「現股」「集保」等欄位，位置又隨畫面而異。
+      // 雜訊字要在查表「之前」濾掉。「商品」剛好是某檔 ETF 名稱的一部分，
+      // 拿去查會查出代號，整條表頭就被當成一筆持股。
+      const cands = nameCandidates(tokens, '').filter((c) => !NOISE.has(c));
+      let matchedName = '';
+      for (const c of cands) {
+        const hit = lookup(c);
+        if (hit) { symbol = hit; matchedName = c; break; }
+      }
+
+      const candidate = matchedName || findName(tokens, '');
+      if (symbol) {
+        resolvedBy = 'name';
+      } else if (candidate && !NOISE.has(candidate)) {
+        if (looksLikeDataRow(tokens, lines[i + 1])) {
           // 只在「這一列看起來真的是一筆持股」時才回報，
           // 否則「庫存明細」這種標題也會被當成認不出的股票，警告就變成雜訊
           unresolved.push(candidate);
@@ -283,30 +316,80 @@ export function suggestMapping(rows = []) {
   if (!width) return [];
 
   const mapping = new Array(width).fill(FIELD.IGNORE);
+  const col = (c) => rows.map((r) => r.numbers[c]).filter((v) => Number.isFinite(v));
 
-  // 每一欄是不是「整數」與其典型大小
   const isInt = [];
   const medians = [];
   for (let c = 0; c < width; c += 1) {
-    const vals = rows.map((r) => r.numbers[c]).filter((v) => Number.isFinite(v));
+    const vals = col(c);
     isInt[c] = vals.length > 0 && vals.every((v) => Number.isInteger(v));
     const sorted = [...vals].sort((a, b) => a - b);
     medians[c] = sorted.length ? sorted[Math.floor(sorted.length / 2)] : 0;
   }
 
-  // 股數：整數欄裡數值最大的那一欄（庫存動輒上千股，單價通常只有兩三位數）
+  const excluded = new Set();
+
+  // 「市值」欄要先排除。它是股數 × 現價，數值往往比股數還大而且也是整數，
+  // 不排掉的話會被當成股數 —— 107,000 股 × 9.73 元的市值 1,041,110
+  // 會變成「持有 1,041,110 股」，而畫面上看起來毫無異常。
+  // 用「這一欄約等於另外兩欄相乘」來認它，比猜欄位順序可靠得多。
+  let priceCol = -1;
   let sharesCol = -1;
+  outer:
   for (let c = 0; c < width; c += 1) {
-    if (!isInt[c]) continue;
-    if (sharesCol === -1 || medians[c] > medians[sharesCol]) sharesCol = c;
+    for (let a = 0; a < width; a += 1) {
+      for (let b = 0; b < width; b += 1) {
+        if (c === a || c === b || a === b) continue;
+        const va = col(a); const vb = col(b); const vc = col(c);
+        const n = Math.min(va.length, vb.length, vc.length);
+        if (n < 1) continue;
+
+        let hit = 0;
+        for (let i = 0; i < n; i += 1) {
+          const prod = va[i] * vb[i];
+          if (vc[i] > 0 && Math.abs(prod - vc[i]) / vc[i] < 0.02) hit += 1;
+        }
+        if (hit === n) {
+          excluded.add(c);
+          // 兩個因數中，整數的是股數、有小數的是價格
+          if (isInt[a] && !isInt[b]) { sharesCol = a; priceCol = b; }
+          else if (isInt[b] && !isInt[a]) { sharesCol = b; priceCol = a; }
+          else { sharesCol = medians[a] >= medians[b] ? a : b; priceCol = sharesCol === a ? b : a; }
+          break outer;
+        }
+      }
+    }
+  }
+
+  // 完全重複的欄位只留第一個。券商的「庫存數量」與「可下單數量」
+  // 多數時候一模一樣，第二欄若被指派成成本價會整批算錯。
+  for (let c = 1; c < width; c += 1) {
+    if (excluded.has(c)) continue;
+    for (let p = 0; p < c; p += 1) {
+      const vc = col(c); const vp = col(p);
+      if (vc.length && vc.length === vp.length && vc.every((v, i) => v === vp[i])) {
+        excluded.add(c);
+        break;
+      }
+    }
+  }
+
+  if (sharesCol < 0) {
+    // 沒有市值可比對時，退回原本的判斷：整數欄裡數值最大的是股數
+    for (let c = 0; c < width; c += 1) {
+      if (!isInt[c] || excluded.has(c)) continue;
+      if (sharesCol === -1 || medians[c] > medians[sharesCol]) sharesCol = c;
+    }
   }
   if (sharesCol >= 0) mapping[sharesCol] = FIELD.SHARES;
+  if (priceCol >= 0) mapping[priceCol] = FIELD.PRICE;
 
   // 其餘欄位由左至右指派為成本價、現價
-  const rest = [];
-  for (let c = 0; c < width; c += 1) if (mapping[c] === FIELD.IGNORE) rest.push(c);
-  if (rest[0] !== undefined) mapping[rest[0]] = FIELD.AVG_COST;
-  if (rest[1] !== undefined) mapping[rest[1]] = FIELD.PRICE;
+  for (let c = 0; c < width; c += 1) {
+    if (mapping[c] !== FIELD.IGNORE || excluded.has(c)) continue;
+    if (!mapping.includes(FIELD.AVG_COST)) mapping[c] = FIELD.AVG_COST;
+    else if (!mapping.includes(FIELD.PRICE)) mapping[c] = FIELD.PRICE;
+  }
 
   return mapping;
 }
@@ -428,10 +511,10 @@ export function rowsToTrades(rows = [], mapping = [], date) {
       errors.push(`${row.symbol}：股數不正確`);
       continue;
     }
-    if (!Number.isFinite(avgCost) || avgCost <= 0) {
-      errors.push(`${row.symbol}：成本價不正確`);
-      continue;
-    }
+    // 成本價缺漏不擋下來 —— 券商的庫存畫面常常只有股數與現價。
+    // 標記成「待補」先把持股建起來，總比整批匯不進去好；
+    // 這種部位不會顯示損益，不會出現憑空編出來的報酬率。
+    const hasCost = Number.isFinite(avgCost) && avgCost > 0;
 
     trades.push({
       date,
@@ -440,7 +523,8 @@ export function rowsToTrades(rows = [], mapping = [], date) {
       action: 'opening',
       // 金額一律以「分」為單位的整數儲存
       shares: Math.round(shares),
-      price: Math.round(avgCost * 100),
+      price: hasCost ? Math.round(avgCost * 100) : 0,
+      costUnknown: !hasCost,
     });
 
     if (Number.isFinite(price) && price > 0) {

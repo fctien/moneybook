@@ -34,8 +34,15 @@ const SAMPLE = `2330 台積電 1,000 600.00 800.00
  */
 export function openStockImport({ onDone } = {}) {
   // batches：每貼一次或每上傳一個檔案算一批，用來支援庫存分好幾頁的情況
+  // 每一批都帶自己的欄位對應。共用一份對應會出事：
+  // 「未實現損益」畫面是 股數/現價/市值 三欄，「即時庫存」畫面是 庫存數量/可下單數量 兩欄，
+  // 兩者混在同一次匯入時，後者的第二欄會被當成前者的「現價」——
+  // 1,000 股的可下單數量變成每股 1,000 元，市值憑空多出一百萬而且畫面上看不出異常。
   const stateIn = {
-    batches: [], mapping: [], rows: [], duplicates: [], combined: false,
+    batches: [],   // [{ rows, mapping }]
+    rows: [],
+    duplicates: [],
+    combined: false,
     // 讀到了但查不出是哪一檔的名稱，要讓使用者知道有東西被漏掉
     unresolved: [],
   };
@@ -76,7 +83,8 @@ export function openStockImport({ onDone } = {}) {
           if (unresolved.length) render();
           return;
         }
-        stateIn.batches.push(rows);
+        // 這一批的欄位對應只依這一批的資料推斷
+        stateIn.batches.push({ rows, mapping: suggestMapping(rows) });
         recompute();
         haptic(12);
         toast(`加入 ${rows.length} 檔`, 'success');
@@ -142,39 +150,43 @@ export function openStockImport({ onDone } = {}) {
     // ------------------------------------------------------------ 欄位對應
 
     function buildMapping() {
-      const width = Math.max(0, ...stateIn.rows.map((r) => (r.numbers ?? []).length));
-      if (!width) return el('div');
+      const groups = [];
 
-      const selects = [];
-      for (let c = 0; c < width; c += 1) {
-        const sample = stateIn.rows.find((r) => r.numbers?.[c] != null)?.numbers[c];
-        selects.push(el('div.map-col', {}, [
-          el('div.map-col__label', { text: `第 ${c + 1} 欄`, title: String(sample ?? '') }),
-          el('select.invoice-item__cat', {
-            onChange: (e) => {
-              stateIn.mapping[c] = e.target.value;
-              // 換了對應就重新套用，使用者手改過的值會被覆蓋 —— 這是刻意的，
-              // 否則畫面會同時存在兩套互相矛盾的數字。
-              // 已經合併過的話要從原始批次重新合併：合併後的 numbers 只留第一批的，
-              // 若拿它重算會靜默得到錯的股數與成本。
-              if (stateIn.combined) {
-                stateIn.rows = combineDuplicates(stateIn.batches.flat(), stateIn.mapping);
-              } else {
-                resolveRows(true);
-              }
-              render();
-            },
-          }, Object.entries(FIELD_LABEL).map(([v, label]) => el('option', {
-            value: v, text: label, selected: stateIn.mapping[c] === v,
-          }))),
-          el('div.map-col__sample', { text: sample == null ? '' : String(sample) }),
+      stateIn.batches.forEach((batch, bi) => {
+        const width = Math.max(0, ...batch.rows.map((r) => (r.numbers ?? []).length));
+        if (!width) return;
+
+        const selects = [];
+        for (let c = 0; c < width; c += 1) {
+          const sample = batch.rows.find((r) => r.numbers?.[c] != null)?.numbers[c];
+          selects.push(el('div.map-col', {}, [
+            el('div.map-col__label', { text: `第 ${c + 1} 欄` }),
+            el('select.invoice-item__cat', {
+              onChange: (e) => {
+                batch.mapping[c] = e.target.value;
+                // 換了對應就重新套用，使用者手改過的值會被覆蓋 —— 這是刻意的，
+                // 否則畫面會同時存在兩套互相矛盾的數字
+                recompute();
+                render();
+              },
+            }, Object.entries(FIELD_LABEL).map(([v, label]) => el('option', {
+              value: v, text: label, selected: batch.mapping[c] === v,
+            }))),
+            el('div.map-col__sample', { text: sample == null ? '' : String(sample) }),
+          ]));
+        }
+
+        groups.push(el('div.field', {}, [
+          el('div.field__label', {
+            text: stateIn.batches.length > 1
+              ? `第 ${bi + 1} 批的欄位（${batch.rows.length} 檔）`
+              : '這幾欄分別是什麼',
+          }),
+          el('div.map-row', {}, selects),
         ]));
-      }
+      });
 
-      return el('div.field', {}, [
-        el('div.field__label', { text: '這幾欄分別是什麼' }),
-        el('div.map-row', {}, selects),
-      ]);
+      return el('div', {}, groups);
     }
 
     // ------------------------------------------------------------ 預覽
@@ -214,8 +226,9 @@ export function openStockImport({ onDone } = {}) {
           el('button.link-btn', {
             type: 'button',
             onClick: () => {
-              const all = stateIn.batches.flat();
-              stateIn.rows = combineDuplicates(all, stateIn.mapping);
+              // 每一批的欄位對應不同，因此先各自攤平成 shares/avgCost/price，
+              // 再交給 combineDuplicates（它會優先採用已攤平的值）
+              stateIn.rows = combineDuplicates(resolvedRowsOfAllBatches(), []);
               stateIn.duplicates = [];
               stateIn.combined = true;
               toast('已合併重複的股票', 'success');
@@ -223,6 +236,16 @@ export function openStockImport({ onDone } = {}) {
             },
           }, ['股數相加、成本取加權平均']),
         ]));
+      }
+
+      // 券商的庫存畫面多半沒有成本價，先講清楚會怎麼處理，
+      // 使用者才不會以為是自己貼漏了
+      if (stateIn.rows.some((r) => !r.skip && !(r.avgCost > 0))) {
+        wrap.append(el('p.hint', {
+          text: '成本價留白也可以匯入，該檔會標記為「成本待補」——'
+            + '算得出市值，但不會顯示損益（用 0 當成本會得到荒謬的報酬率）。'
+            + '之後在該檔的「買進」補一筆，或直接改這裡即可。',
+        }));
       }
 
       for (const row of stateIn.rows) {
@@ -267,7 +290,7 @@ export function openStockImport({ onDone } = {}) {
             : null,
           el('div.import-row__fields', {}, [
             labelled('股數', num('shares', '必填')),
-            labelled('成本價', num('avgCost', '必填')),
+            labelled('成本價', num('avgCost', '沒有可留白')),
             labelled('現價', num('price', '選填')),
           ]),
         ]));
@@ -292,7 +315,6 @@ export function openStockImport({ onDone } = {}) {
             stateIn.batches = [];
             stateIn.rows = [];
             stateIn.duplicates = [];
-            stateIn.mapping = [];
             stateIn.combined = false;
             stateIn.unresolved = [];
             render();
@@ -306,7 +328,7 @@ export function openStockImport({ onDone } = {}) {
     }
 
     async function doImport() {
-      const { trades, quotes, errors } = rowsToTrades(stateIn.rows, stateIn.mapping, todayISO());
+      const { trades, quotes, errors } = rowsToTrades(stateIn.rows, [], todayISO());
 
       if (!trades.length) {
         toast(errors[0] ?? '沒有可匯入的資料', 'error', 3600);
@@ -352,25 +374,43 @@ export function openStockImport({ onDone } = {}) {
     function recompute() {
       // 又貼了新的一頁，先前的合併結果就過時了
       stateIn.combined = false;
-      const merged = mergeBatches(stateIn.batches);
-      stateIn.rows = merged.rows;
+      const merged = mergeBatches(stateIn.batches.map((b) => b.rows));
       stateIn.duplicates = merged.duplicates;
-      if (!stateIn.mapping.length) stateIn.mapping = suggestMapping(stateIn.rows);
-      resolveRows(true);
+      stateIn.rows = dedupeKeepFirst(resolvedRowsOfAllBatches());
     }
 
-    /** 依目前的欄位對應，把 numbers 攤成 shares / avgCost / price */
-    function resolveRows(overwrite = false) {
-      const idx = (field) => stateIn.mapping.indexOf(field);
-      for (const row of stateIn.rows) {
-        const pick = (field) => {
-          const i = idx(field);
-          return i >= 0 ? row.numbers?.[i] ?? null : null;
-        };
-        if (overwrite || row.shares == null) row.shares = pick(FIELD.SHARES);
-        if (overwrite || row.avgCost == null) row.avgCost = pick(FIELD.AVG_COST);
-        if (overwrite || row.price == null) row.price = pick(FIELD.PRICE);
+    /**
+     * 把每一批各自依「自己的」欄位對應攤平成 shares / avgCost / price。
+     * 之後的合併與寫入都只看這三個欄位，不再需要 mapping。
+     */
+    function resolvedRowsOfAllBatches() {
+      const out = [];
+      for (const batch of stateIn.batches) {
+        const idx = (field) => batch.mapping.indexOf(field);
+        for (const row of batch.rows) {
+          const pick = (field) => {
+            const i = idx(field);
+            return i >= 0 ? row.numbers?.[i] ?? null : null;
+          };
+          row.shares = pick(FIELD.SHARES);
+          row.avgCost = pick(FIELD.AVG_COST);
+          row.price = pick(FIELD.PRICE);
+          out.push(row);
+        }
       }
+      return out;
+    }
+
+    /** 同一代號只留第一次出現的那筆（重複的另外提示，不自動相加） */
+    function dedupeKeepFirst(rows) {
+      const seen = new Set();
+      const out = [];
+      for (const r of rows) {
+        if (seen.has(r.symbol)) continue;
+        seen.add(r.symbol);
+        out.push(r);
+      }
+      return out;
     }
 
     render();

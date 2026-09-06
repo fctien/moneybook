@@ -432,7 +432,100 @@
 </section>
 
 <section>
-<h2>10. 待辦</h2>
+<h2>10. 用真實券商截圖驗證（v1.6.0）</h2>
+<p>
+使用者提供了兩張實際畫面：<strong>證券－未實現損益</strong>與<strong>證券－即時庫存</strong>。
+用假資料完全看不出來的四個問題因此浮現，其中三個會<strong>靜默出錯</strong>。
+</p>
+
+<h3>10.1 兩種格式</h3>
+<table>
+<tr><th>畫面</th><th>欄位</th><th>有無成本價</th></tr>
+<tr><td>未實現損益</td><td>商品｜交易別｜庫存數量｜現價｜市值</td><td><span class="pill bad">沒有</span></td></tr>
+<tr><td>即時庫存</td><td>下單｜商品｜交易別｜庫存數量｜可下單數量</td><td><span class="pill bad">沒有</span></td></tr>
+</table>
+<p class="muted">兩者都<strong>只有名稱、沒有股票代號</strong>。</p>
+
+<h3>10.2 四個問題</h3>
+
+<div class="bug">
+<h3>一：「下單」被當成股票名稱</h3>
+<dl>
+  <dt>後果</dt><dd>即時庫存整批解析出 <strong>0 筆</strong></dd>
+  <dt>修正</dt><dd>加入雜訊字清單，並改為「逐一試每個非數字欄位，第一個查得到的才是名稱」。
+      這比「取第一個非數字欄位」穩健得多 &mdash; 券商在名稱前後各塞了欄位，位置又隨畫面而異</dd>
+</dl>
+</div>
+
+<div class="bug">
+<h3>二：「市值」被當成股數</h3>
+<dl>
+  <dt>原因</dt><dd>107,000 股 &times; 9.73 元 = 1,041,110 的市值也是整數，而且<strong>比股數還大</strong>，
+      原本「整數欄裡最大的是股數」的判斷正好選中它</dd>
+  <dt>後果</dt><dd>變成「持有 1,041,110 股」，而畫面上看起來毫無異常</dd>
+  <dt>修正</dt><dd>用「這一欄約等於另外兩欄相乘」認出市值欄並排除，
+      再從兩個因數中取整數的當股數、有小數的當價格。比猜欄位順序可靠得多</dd>
+</dl>
+</div>
+
+<div class="bug">
+<h3>三：重複的數量欄被當成成本價</h3>
+<dl>
+  <dt>原因</dt><dd>「庫存數量」與「可下單數量」多數時候一模一樣</dd>
+  <dt>修正</dt><dd>數值完全相同的欄位只留第一個</dd>
+</dl>
+</div>
+
+<div class="bug">
+<h3>四：兩種畫面都沒有成本價</h3>
+<dl>
+  <dt>後果</dt><dd>原本成本是必填，真實資料會<strong>整批被擋下來</strong>，功能等於不能用</dd>
+  <dt>修正</dt><dd>允許成本留白，標記為「成本待補」：算得出市值，但<strong>不顯示損益</strong>。
+      用 0 當成本會得到「賺了整個市值」這種荒謬的報酬率</dd>
+</dl>
+</div>
+
+<h3>10.3 端對端測試時又抓到一個</h3>
+<div class="bug">
+<h3>兩種格式混在同一次匯入時，欄位對應被共用</h3>
+<dl>
+  <dt>現象</dt><dd>台灣虎航 1,000 股，市值卻算出一百萬</dd>
+  <dt>原因</dt><dd>欄位對應原本是整個匯入流程共用一份。
+      即時庫存的第二欄（可下單數量 1,000）被套上未實現損益的「現價」，
+      變成每股 1,000 元</dd>
+  <dt>修正</dt><dd>改成<strong>每一批帶自己的欄位對應</strong>，
+      各自攤平成 shares／avgCost／price 之後才合併</dd>
+  <dt>只有實測才看得到</dt><dd>單元測試都是單一格式，這個錯誤只在「混貼兩種畫面」時出現</dd>
+</dl>
+</div>
+
+<h3>10.4 自己造成的兩個失誤</h3>
+<div class="note">
+<strong>Python 的 <code>str.replace</code> 預設取代所有出現處。</strong>
+插入一段用到區域變數 <code>wrap</code> 的程式碼時，它同時被複製到另一個同樣寫著
+<code>for (const row of stateIn.rows)</code> 的函式裡，造成
+<code>ReferenceError: wrap is not defined</code>，整個匯入按鈕沒有任何反應也沒有提示。
+先前已經因為「replace 沒對上卻不報錯」吃過一次虧，這次是同一個工具的另一種陷阱。
+</div>
+<div class="note">
+<strong>Service Worker 快取讓修正看起來沒有生效。</strong>
+清快取後重載，SW 會立刻重新註冊並快取「當下」的檔案；之後再改的檔案就被舊快取蓋住。
+正確順序是：<strong>改完檔案</strong> → 清快取 → 重載。這一點在開發期反覆浪費時間，值得記住。
+</div>
+
+<h3>10.5 驗證</h3>
+<table>
+<tr><th>項目</th><th>結果</th></tr>
+<tr><td>真實格式測試（新增檔案）</td><td><span class="pill ok">14 / 14</span></td></tr>
+<tr><td>全部單元測試</td><td><span class="pill ok">181 / 181</span></td></tr>
+<tr><td>名稱對代號</td><td><span class="pill ok">45 / 46</span>（含「臺灣」異體字、<code>00937B</code> 債券 ETF、興櫃股）</td></tr>
+<tr><td>混貼兩種格式</td><td><span class="pill ok">各批數字互不干擾</span></td></tr>
+<tr><td>成本待補顯示</td><td><span class="pill ok">「107000 股・成本待補　現價 9.73」</span></td></tr>
+</table>
+</section>
+
+<section>
+<h2>11. 待辦</h2>
 <ul>
   <li>股票模組<strong>第三階段</strong>：FinMind 自動抓價（預設關閉）＋自動更新證券帳戶估值</li>
   <li>股票模組<strong>第四階段</strong>：持股佔比、產業分布、個股損益、市值趨勢等圖表</li>

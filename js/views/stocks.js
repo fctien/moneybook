@@ -90,9 +90,16 @@ export function createStocksSection() {
       el('div.stat__value', { text: value }),
     ]))));
 
-    if (!s.complete && s.missingQuotes.length) {
+    if (s.missingQuotes.length) {
       refs.summary.append(el('p.hint.hint--warn', {
         text: `${s.missingQuotes.join('、')} 還沒有股價，因此不計入市值與損益。點該檔可以填入目前股價。`,
+      }));
+    }
+
+    if (s.missingCost?.length) {
+      refs.summary.append(el('p.hint.hint--warn', {
+        text: `${s.missingCost.join('、')} 的成本待補，因此不顯示損益。`
+          + '點該檔用「買進」補一筆，或到「+ 新增持股」重新填入平均成本。',
       }));
     }
 
@@ -132,7 +139,8 @@ export function createStocksSection() {
         el('div.stock-row__main', {}, [
           el('div.stock-row__title', { text: r.name ? `${r.symbol} ${r.name}` : r.symbol }),
           el('div.stock-row__sub', {
-            text: `${r.shares} 股・均價 ${formatAmount(Math.round(r.avgCost))}`
+            text: `${r.shares} 股・`
+              + (r.costUnknown ? '成本待補' : `均價 ${formatAmount(Math.round(r.avgCost))}`)
               + (r.price ? `　現價 ${formatAmount(r.price)}` : ''),
           }),
         ]),

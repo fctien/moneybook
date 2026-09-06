@@ -353,7 +353,7 @@ test('rowsToTrades 產生期初交易與報價，金額轉為分', () => {
   assert.equal(out.trades.length, 1);
   assert.deepEqual(out.trades[0], {
     date: '2026-09-06', symbol: '2330', name: '台積電',
-    action: 'opening', shares: 1000, price: 60000,
+    action: 'opening', shares: 1000, price: 60000, costUnknown: false,
   });
   assert.deepEqual(out.quotes, [{ symbol: '2330', close: 80000 }]);
   assert.deepEqual(out.errors, []);
@@ -366,16 +366,26 @@ test('沒有現價欄位時不產生報價，但交易照樣建立', () => {
   assert.deepEqual(out.quotes, []);
 });
 
-test('股數或成本不正確的列會被擋下並回報，不會靜默寫入', () => {
-  const rows = [
-    { symbol: '2330', name: '台積電', numbers: [0, 600] },
-    { symbol: '2317', name: '鴻海', numbers: [1000, 0] },
-  ];
+test('股數不正確的列會被擋下並回報，不會靜默寫入', () => {
+  const rows = [{ symbol: '2330', name: '台積電', numbers: [0, 600] }];
   const out = rowsToTrades(rows, [FIELD.SHARES, FIELD.AVG_COST], '2026-09-06');
   assert.equal(out.trades.length, 0);
-  assert.equal(out.errors.length, 2);
+  assert.equal(out.errors.length, 1);
   assert.match(out.errors[0], /股數/);
-  assert.match(out.errors[1], /成本/);
+});
+
+test('缺成本價不擋下來，標記為「成本待補」照樣建立持股', () => {
+  // 券商的庫存畫面（未實現損益、即時庫存）都只有股數與現價，沒有成本。
+  // 整批擋掉的話這個功能對真實資料就等於不能用。
+  const rows = [{ symbol: '2330', name: '台積電', numbers: [1000, 800] }];
+  const out = rowsToTrades(rows, [FIELD.SHARES, FIELD.PRICE], '2026-09-06');
+
+  assert.equal(out.errors.length, 0);
+  assert.equal(out.trades.length, 1);
+  assert.equal(out.trades[0].shares, 1000);
+  assert.equal(out.trades[0].price, 0);
+  assert.equal(out.trades[0].costUnknown, true);
+  assert.deepEqual(out.quotes, [{ symbol: '2330', close: 80000 }], '現價仍要寫進報價');
 });
 
 test('使用者在預覽表改過的值優先於自動解析', () => {

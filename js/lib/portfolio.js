@@ -69,6 +69,11 @@ export function validateTrade(input) {
   const tax = Math.max(0, num(t.tax) ?? 0);
   const amount = num(t.amount) ?? 0;
 
+  // 券商的庫存畫面常常只有股數與現價、沒有成本價。
+  // 這種情況允許先把持股建起來並標記「成本待補」，總比整批匯不進去好 ——
+  // 但成本未知的部位不會顯示損益，否則會看到一個憑空編出來的報酬率。
+  const costUnknown = Boolean(t.costUnknown) && t.action === ACTION.OPENING;
+
   if (t.action === ACTION.DIVIDEND) {
     if (amount <= 0) return { ok: false, error: '現金股利金額要大於 0' };
   } else if (t.action === ACTION.STOCK_DIV) {
@@ -79,7 +84,7 @@ export function validateTrade(input) {
     if (!Number.isInteger(shares) || shares <= 0) {
       return { ok: false, error: '股數要是大於 0 的整數' };
     }
-    if (price <= 0) return { ok: false, error: '價格要大於 0' };
+    if (price <= 0 && !costUnknown) return { ok: false, error: '價格要大於 0' };
   }
 
   return {
@@ -96,6 +101,7 @@ export function validateTrade(input) {
       tax: Math.round(tax),
       amount: Math.round(amount),
       note: String(t.note ?? '').trim(),
+      costUnknown,
       createdAt: t.createdAt ?? Date.now(),
     },
   };
@@ -120,6 +126,7 @@ function emptyPosition(symbol) {
     name: '',
     shares: 0,
     totalCost: 0,     // 目前持股的總成本（分）
+    unknownCostShares: 0, // 其中成本未知的股數（由庫存畫面匯入、沒有成本價）
     realized: 0,      // 已實現損益（分），含股利
     dividends: 0,     // 其中來自現金股利的部分
     tradeCount: 0,
@@ -151,6 +158,7 @@ export function computePositions(trades = []) {
         // 買進成本含手續費 —— 手續費是取得這批股票必須付出的代價
         p.shares += t.shares;
         p.totalCost += t.shares * t.price + t.fee;
+        if (t.costUnknown) p.unknownCostShares += t.shares;
         break;
       }
 
@@ -166,10 +174,14 @@ export function computePositions(trades = []) {
 
         p.realized += proceeds - costOfSold;
         p.totalCost -= costOfSold;
+        // 成本未知的部分也依比例減少，否則賣掉一半之後旗標仍舊掛著
+        if (p.unknownCostShares > 0 && p.shares > 0) {
+          p.unknownCostShares = Math.max(0, Math.round(p.unknownCostShares * (1 - sold / p.shares)));
+        }
         p.shares -= sold;
 
         // 全部賣光時把成本歸零，避免留下四捨五入的零頭
-        if (p.shares === 0) p.totalCost = 0;
+        if (p.shares === 0) { p.totalCost = 0; p.unknownCostShares = 0; }
         break;
       }
 
@@ -210,18 +222,23 @@ export function valuePosition(position, priceCents) {
   const cost = position?.totalCost ?? 0;
   const hasPrice = Number.isFinite(priceCents) && priceCents > 0;
 
+  // 從券商庫存畫面匯入時常常沒有成本價。這種部位算得出市值，
+  // 但算不出損益 —— 硬用 0 當成本會得到「賺了整個市值」這種荒謬的報酬率。
+  const costUnknown = (position?.unknownCostShares ?? 0) > 0;
+
   const marketValue = hasPrice ? Math.round(shares * priceCents) : null;
-  const unrealized = hasPrice ? marketValue - cost : null;
+  const unrealized = hasPrice && !costUnknown ? marketValue - cost : null;
 
   return {
     ...position,
     price: hasPrice ? priceCents : null,
     avgCost: averageCost(position),
+    costUnknown,
     marketValue,
     unrealized,
     // 報酬率以「目前持股成本」為分母；成本為 0（已全部賣出）時沒有意義
-    returnRate: hasPrice && cost > 0 ? unrealized / cost : null,
-    totalReturn: hasPrice ? unrealized + position.realized : null,
+    returnRate: unrealized !== null && cost > 0 ? unrealized / cost : null,
+    totalReturn: unrealized !== null ? unrealized + position.realized : null,
   };
 }
 
@@ -242,11 +259,16 @@ export function summarizePortfolio(positions = [], quotes = {}) {
   const realized = rows.reduce((a, r) => a + r.realized, 0);
   const dividends = rows.reduce((a, r) => a + r.dividends, 0);
 
-  // 只有全部持股都有報價時，未實現損益才是完整的數字。
+  // 損益只能用「有報價、而且成本已知」的部位來算。
   // 少算一檔卻照樣顯示總額，會讓使用者以為自己虧損 —— 這種誤導比沒有數字更糟。
-  const complete = held.length > 0 && priced.length === held.length;
-  const costOfPriced = priced.reduce((a, r) => a + r.totalCost, 0);
-  const unrealized = priced.reduce((a, r) => a + r.unrealized, 0);
+  const costUnknownRows = held.filter((r) => r.costUnknown);
+  const computable = priced.filter((r) => r.unrealized !== null);
+  const complete = held.length > 0
+    && priced.length === held.length
+    && costUnknownRows.length === 0;
+
+  const costOfPriced = computable.reduce((a, r) => a + r.totalCost, 0);
+  const unrealized = computable.reduce((a, r) => a + r.unrealized, 0);
 
   return {
     rows,
@@ -260,6 +282,7 @@ export function summarizePortfolio(positions = [], quotes = {}) {
     pricedCount: priced.length,
     heldCount: held.length,
     missingQuotes: held.filter((r) => r.marketValue === null).map((r) => r.symbol),
+    missingCost: costUnknownRows.map((r) => r.symbol),
     complete,
   };
 }
