@@ -413,3 +413,90 @@ test('分三次擷取窄欄位，合併後成本與券商完全一致', () => {
   assert.equal(by['3008'].shares, 11);
   assert.equal(by['3008'].totalCost, 3_780_600, '成本 37,806 元');
 });
+
+// ── 一個欄位一行（iOS 即時文字對這張表的實際輸出）────────────
+
+// 順序完好、只是每個儲存格單獨斷行。這種可以精確還原，
+// 與「逐直行讀取」（對應關係已消失）是兩回事。
+const FLATTENED = `單
+商品
+
+種類 即時數量 可下單數 現價
+
+
+市值
+持有成本
+幣別
+下單
+主動凱基台灣
+集保
+107,000
+107,000
+9.73
+1,041,110
+935,431
+台幣
+下單
+元大台灣50
+集保
+4,000
+4,000
+107.9
+431,600
+203,462
+台幣
+下單
+友訊
+集保
+173
+173
+19.55
+3,382.15
+0
+台幣`;
+
+test('一個欄位一行：還原成一列一筆，不會被誤判為直行拆解', () => {
+  const r = extractHoldings(FLATTENED, opts);
+  assert.equal(r.layoutLost, false, '順序完好，可以還原');
+  assert.equal(r.rows.length, 3);
+  assert.deepEqual(r.rows[0].numbers, [107000, 107000, 9.73, 1041110, 935431]);
+});
+
+test('一個欄位一行：表頭自動濾出數字欄的欄名', () => {
+  // 表頭裡的「單／商品／種類／幣別」是文字欄，濾掉之後
+  // 剩下的五個欄名剛好對上每一列的五個數字
+  const r = extractHoldings(FLATTENED, opts);
+  assert.deepEqual(r.header, ['即時數量', '可下單數', '現價', '市值', '持有成本']);
+  assert.deepEqual(suggestMapping(r.rows, r.header), [
+    FIELD.SHARES, FIELD.IGNORE, FIELD.PRICE, FIELD.IGNORE, FIELD.TOTAL_COST,
+  ]);
+});
+
+test('一個欄位一行：成本與現價都與券商一致', () => {
+  const r = extractHoldings(FLATTENED, opts);
+  const out = rowsToTrades(r.rows, suggestMapping(r.rows, r.header), '2026-09-06');
+  const by = Object.fromEntries(
+    computePositions(out.trades.map((t, i) => ({ ...t, tax: 0, amount: 0, createdAt: i })))
+      .map((p) => [p.symbol, p]),
+  );
+
+  assert.equal(by['00407A'].totalCost, 93_543_100, '935,431 元');
+  assert.equal(by['0050'].totalCost, 20_346_200, '203,462 元');
+  assert.equal(by['2332'].totalCost, 0, '友訊全部由配股取得');
+
+  const quotes = Object.fromEntries(out.quotes.map((q) => [q.symbol, q.close]));
+  assert.equal(quotes['00407A'], 973);
+  assert.equal(quotes['0050'], 10790);
+});
+
+test('一個欄位一行：每列數字個數不一致時不硬做', () => {
+  // 切段不可靠就退回原本的逐行處理，寧可少解出東西也不要對錯欄位
+  const broken = `台積電
+1,000
+2,410
+鴻海
+1,000`;
+  const r = extractHoldings(broken, opts);
+  assert.ok(r.rows.every((x) => x.numbers.length !== 2 || x.symbol === '2330'),
+    '不該把兩檔的數字混在一起');
+});

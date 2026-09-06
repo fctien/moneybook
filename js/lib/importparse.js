@@ -193,6 +193,67 @@ const NOISE = new Set([
   '合計', '小計', '總計', '總市值', '股數',
 ]);
 
+/**
+ * 表頭裡屬於「文字欄」的欄名 —— 這些欄位不會出現數字。
+ * 用來從表頭推算出「哪幾欄是數字欄」，才能對上每一列的數字。
+ */
+const TEXT_HEADERS = new Set([
+  '單', '下單', '商品', '商品名稱', '名稱', '股票名稱', '種類', '交易別', '幣別',
+]);
+
+/**
+ * 把「一個欄位一行」的排版還原成一列一筆。
+ *
+ * iOS 即時文字對某些表格會把每個儲存格單獨斷行，但<strong>順序是完整保留的</strong>：
+ *   下單 / 主動凱基台灣 / 集保 / 107,000 / 107,000 / 9.73 / 1,041,110 / 935,431 / 台幣
+ *   下單 / 元大台灣50   / 集保 / 4,000  / …
+ * 這種情況以「認得出來的股票」當錨點切段，錨點之間的數字就是該檔的資料。
+ *
+ * 與「逐直行讀取」不同 —— 那種是名稱與數字各自成塊、對應關係已經消失，
+ * 只能請使用者改變擷取方式；這種則是順序完好，可以精確還原。
+ *
+ * @returns {{lines: string[][], header: string[]|null} | null} 不適用時回傳 null
+ */
+function regroupFlattened(lines, lookup) {
+  const flat = [];
+  for (const line of lines) for (const t of line) flat.push(String(t).trim());
+  if (flat.length < 6) return null;
+
+  const isAnchor = (t) => {
+    if (NOISE.has(t) || TEXT_HEADERS.has(t)) return false;
+    if (toNumber(t) !== null) return false;
+    if (SYMBOL_RE.test(t)) return true;
+    return Boolean(lookup && lookup(t));
+  };
+
+  const anchors = [];
+  flat.forEach((t, i) => { if (isAnchor(t)) anchors.push(i); });
+  if (anchors.length < 2) return null;
+
+  const rows = [];
+  for (let k = 0; k < anchors.length; k += 1) {
+    const from = anchors[k];
+    const to = k + 1 < anchors.length ? anchors[k + 1] : flat.length;
+    const nums = [];
+    for (let i = from + 1; i < to; i += 1) {
+      const n = toNumber(flat[i]);
+      if (n !== null) nums.push(flat[i]);
+    }
+    rows.push([flat[from], ...nums]);
+  }
+
+  // 每一列的數字個數要一致，否則代表切段不可靠，寧可不處理
+  const counts = rows.map((r) => r.length - 1);
+  const width = counts[0];
+  if (!width || counts.some((c) => c !== width)) return null;
+
+  // 錨點之前的就是表頭；濾掉文字欄後剩下的即為數字欄的欄名
+  const headerTokens = flat.slice(0, anchors[0]).filter((t) => !TEXT_HEADERS.has(t));
+  const header = headerTokens.length === width ? headerTokens : null;
+
+  return { lines: rows, header };
+}
+
 /** 取出所有可能是股票名稱的字串，依出現順序排列 */
 function nameCandidates(tokens, symbol) {
   const out = [];
@@ -251,7 +312,7 @@ export function extractHoldings(text, opts = {}) {
   // 先拿掉千分位再判斷，否則「1,000」會讓純文字被誤認成 CSV
   const looksTabular = /[\t;]/.test(src) || /,/.test(stripThousands(src));
 
-  const lines = looksTabular
+  let lines = looksTabular
     ? parseCSV(src)
     : src.split('\n').map((l) => l.trim().split(/\s{1,}/).filter(Boolean));
 
@@ -261,9 +322,19 @@ export function extractHoldings(text, opts = {}) {
   let header = null;
   let skipped = 0;
 
+  // 「一個欄位一行」的排版：順序完好，可以精確還原成一列一筆
+  const single = lines.filter((l) => l.length === 1).length;
+  if (lines.length >= 6 && single >= lines.length * 0.7) {
+    const flat = regroupFlattened(lines, lookup);
+    if (flat) {
+      lines = flat.lines;
+      header = flat.header;
+    }
+  }
+
   // 表頭：整列都是已知欄名的那一行。找到就能直接照欄名對應，
   // 不必從數值特徵猜 —— 猜錯了畫面上完全看不出來。
-  for (const line of lines) {
+  for (const line of header ? [] : lines) {
     const toks = line.filter((t) => String(t).trim() !== '');
     if (toks.length < 2) continue;
     // 表頭不會有數字。這一條比「至少要有幾個已知欄名」可靠得多 ——
@@ -425,13 +496,18 @@ function mapByHeader(rows, header) {
 
   const sample = rows.find((r) => Array.isArray(r.numberAt) && r.numberAt.length);
   if (!sample) return null;
-  // 欄數對不上就不能靠位置對應，寧可退回數值判斷
-  if (sample.tokens?.length !== header.length) return null;
 
-  const mapping = sample.numberAt.map((idx) => {
-    const name = String(header[idx] ?? '').trim();
-    return HEADER_FIELD.get(name) ?? FIELD.IGNORE;
-  });
+  let mapping;
+  if (header.length === sample.numbers.length) {
+    // 表頭已經只剩數字欄的欄名（「一個欄位一行」還原後的情形），直接一對一
+    mapping = header.map((name) => HEADER_FIELD.get(String(name).trim()) ?? FIELD.IGNORE);
+  } else if (sample.tokens?.length === header.length) {
+    // 完整表頭：要靠 numberAt 把欄名對回數字欄
+    mapping = sample.numberAt.map((idx) => HEADER_FIELD.get(String(header[idx] ?? '').trim()) ?? FIELD.IGNORE);
+  } else {
+    // 欄數對不上就不能靠位置對應，寧可退回數值判斷
+    return null;
+  }
 
   // 只要認出任何一個有意義的欄位就採用。
   // 不能硬性要求「必須有股數」—— 分次擷取窄欄位時，某一批可能只帶成本，

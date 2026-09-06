@@ -699,7 +699,58 @@
 </section>
 
 <section>
-<h2>13. 待辦</h2>
+<h2>13. 「一個欄位一行」的排版（v1.9.0）</h2>
+<p>
+使用者換了擷取方式後貼上的內容<strong>完全不同</strong> ——
+每個儲存格單獨斷行，但<strong>列的順序完整保留</strong>：
+</p>
+<pre><code>下單 / 主動凱基台灣 / 集保 / 107,000 / 107,000 / 9.73 / 1,041,110 / 935,431 / 台幣
+下單 / 元大台灣50   / 集保 / 4,000   / 4,000   / 107.9 / 431,600  / 203,462 / 台幣</code></pre>
+<div class="note">
+這與前一節的「逐直行讀取」是<strong>兩回事</strong>：
+直行拆解的名稱與數字各自成塊、對應關係已經消失，只能請使用者改變擷取方式；
+這種則是順序完好，<strong>可以精確還原</strong>。
+</div>
+
+<h3>13.1 做法</h3>
+<ol>
+  <li>偵測：七成以上的行只有一個欄位</li>
+  <li>把所有欄位攤平成一串，以「認得出來的股票」當錨點切段</li>
+  <li>錨點之間的數字就是該檔的資料</li>
+  <li><strong>每一列的數字個數必須一致</strong>，否則代表切段不可靠，直接放棄不硬做</li>
+</ol>
+
+<h3>13.2 表頭的處理</h3>
+<p>
+表頭也是一個欄位一行（單／商品／種類／即時數量／可下單數／現價／市值／持有成本／幣別）。
+新增 <code>TEXT_HEADERS</code> 濾掉文字欄，剩下的
+<strong>五個欄名剛好對上每一列的五個數字</strong>：
+</p>
+<pre><code>即時數量 → 股數      可下單數 → 不使用    現價 → 現價
+市值     → 不使用    持有成本 → 成本總額</code></pre>
+
+<h3>13.3 驗證（與券商逐項對照）</h3>
+<table>
+<tr><th>個股</th><th>股數</th><th>成本</th><th>現價</th><th>市值</th></tr>
+<tr><td>主動凱基台灣</td><td>107,000</td><td><span class="pill ok">935,431</span></td><td>9.73</td><td><span class="pill ok">1,041,110</span></td></tr>
+<tr><td>元大台灣50</td><td>4,000</td><td><span class="pill ok">203,462</span></td><td>107.9</td><td><span class="pill ok">431,600</span></td></tr>
+<tr><td>大立光</td><td>11</td><td><span class="pill ok">37,806</span></td><td>7,400</td><td><span class="pill ok">81,400</span></td></tr>
+<tr><td>友訊</td><td>173</td><td><span class="pill ok">0</span></td><td>19.55</td><td><span class="pill ok">3,382.15</span></td></tr>
+</table>
+<p class="muted">全部單元測試 <strong>202 / 202</strong>，其中 30 項以使用者的真實排版當測資。</p>
+
+<h3>13.4 現在支援的四種排版</h3>
+<table>
+<tr><th>排版</th><th>處理方式</th></tr>
+<tr><td>一列一筆（含表頭）</td><td>照表頭欄名對應</td></tr>
+<tr><td>名稱一行、數字一行</td><td>往下一行借數字</td></tr>
+<tr><td><strong>一個欄位一行</strong></td><td>攤平後以股票為錨點切段</td></tr>
+<tr><td>逐直行讀取（對應已消失）</td><td>偵測並請使用者改用窄欄位分次擷取</td></tr>
+</table>
+</section>
+
+<section>
+<h2>14. 待辦</h2>
 <ul>
   <li>股票模組<strong>第三階段</strong>：FinMind 自動抓價（預設關閉）＋自動更新證券帳戶估值</li>
   <li>股票模組<strong>第四階段</strong>：持股佔比、產業分布、個股損益、市值趨勢等圖表</li>
