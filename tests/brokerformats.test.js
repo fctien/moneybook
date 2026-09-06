@@ -613,3 +613,85 @@ test('補位後的欄位對應仍然正確，其餘各檔照常匯入', () => {
   assert.equal(by['4904'].shares * by['4904'].price + by['4904'].fee, 4_263_000, '遠傳成本 42,630');
   assert.equal(by['4175'].costUnknown, true, '杏一的成本那一格本來就沒有值');
 });
+
+// ── 沒有表頭時，要分清楚「成本總額」與「每股成本」──────────
+
+const NO_HEADER = `下單
+主動凱基台灣
+集保
+107,000
+107,000
+9.73
+1,041,110
+935,431
+台幣
+下單
+元大台灣50
+集保
+4,000
+4,000
+107.9
+431,600
+203,462
+台幣
+下單
+大立光
+集保
+11
+11
+7,400
+81,400
+37,806
+台幣`;
+
+test('沒有表頭時，持有成本要被認成「成本總額」而不是「每股成本」', () => {
+  // 這是沒有表頭時最容易踩到的坑：107,000 股的持有成本是 935,431。
+  // 當成每股成本的話，均價會顯示 935,431 元、總成本膨脹到一千億，
+  // 而畫面上只會看到一個很大的數字，不會有任何錯誤訊息。
+  const r = extractHoldings(NO_HEADER, opts);
+  assert.equal(r.header, null, '這份資料本來就沒有表頭');
+
+  const m = suggestMapping(r.rows, r.header);
+  assert.deepEqual(m, [
+    FIELD.SHARES, FIELD.IGNORE, FIELD.PRICE, FIELD.IGNORE, FIELD.TOTAL_COST,
+  ]);
+});
+
+test('沒有表頭時算出的均價仍與券商一致', () => {
+  const r = extractHoldings(NO_HEADER, opts);
+  const m = suggestMapping(r.rows, r.header);
+  const resolved = r.rows.map((x) => ({
+    ...x,
+    shares: x.numbers[m.indexOf(FIELD.SHARES)],
+    price: x.numbers[m.indexOf(FIELD.PRICE)],
+    totalCost: x.numbers[m.indexOf(FIELD.TOTAL_COST)],
+  }));
+
+  const by = Object.fromEntries(
+    computePositions(
+      rowsToTrades(resolved, m, '2026-09-06').trades
+        .map((t, i) => ({ ...t, tax: 0, amount: 0, createdAt: i })),
+    ).map((p) => [p.symbol, p]),
+  );
+
+  // [代號, 券商均價, 券商成本]
+  for (const [sym, avg, cost] of [
+    ['00407A', 8.7423, 935_431],
+    ['0050', 50.8655, 203_462],
+    ['3008', 3436.9091, 37_806],
+  ]) {
+    assert.equal(by[sym].totalCost, Math.round(cost * 100), `${sym} 成本`);
+    const mine = by[sym].totalCost / by[sym].shares / 100;
+    assert.ok(Math.abs(mine - avg) < 0.0001, `${sym} 均價 ${mine} 應為 ${avg}`);
+  }
+});
+
+test('每股成本欄位仍能被正確認出（別矯枉過正）', () => {
+  // 這一份的成本是「每股」而非總額，不該被誤判成總額
+  const perShare = `商品 庫存數量 現價 每股成本
+台積電 1,000 2,410 848.725
+鴻海 1,000 256 208.177`;
+  const r = extractHoldings(perShare, opts);
+  const m = suggestMapping(r.rows, r.header);
+  assert.ok(!m.includes(FIELD.TOTAL_COST), '每股成本不該被當成總額');
+});

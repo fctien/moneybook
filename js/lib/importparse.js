@@ -682,10 +682,30 @@ function suggestByShape(rows = []) {
   if (sharesCol >= 0) mapping[sharesCol] = FIELD.SHARES;
   if (priceCol >= 0) mapping[priceCol] = FIELD.PRICE;
 
-  // 其餘欄位由左至右指派為成本價、現價
+  // 剩下的成本欄要分清楚是「總額」還是「每股」。
+  //
+  // 券商多半給總額：107,000 股的持有成本是 935,431。把它當成每股成本，
+  // 均價會顯示 935,431 元、總成本膨脹到一千億 —— 這是沒有表頭時最容易踩到的坑。
+  // 判斷方式是比數量級：看這個值比較接近「股數 × 現價」還是「現價」。
+  const typicalValue = sharesCol >= 0 && priceCol >= 0
+    ? medians[sharesCol] * medians[priceCol]
+    : 0;
+  const typicalPrice = priceCol >= 0 ? medians[priceCol] : 0;
+
   for (let c = 0; c < width; c += 1) {
     if (mapping[c] !== FIELD.IGNORE || excluded.has(c)) continue;
-    if (!mapping.includes(FIELD.AVG_COST)) mapping[c] = FIELD.AVG_COST;
+
+    const v = Math.abs(medians[c]);
+    let role = FIELD.AVG_COST;
+
+    if (v > 0 && typicalValue > 0 && typicalPrice > 0) {
+      // 取對數距離，數量級相差幾個級距一目了然
+      const toTotal = Math.abs(Math.log(v / typicalValue));
+      const toPer = Math.abs(Math.log(v / typicalPrice));
+      role = toTotal < toPer ? FIELD.TOTAL_COST : FIELD.AVG_COST;
+    }
+
+    if (!mapping.includes(role)) mapping[c] = role;
     else if (!mapping.includes(FIELD.PRICE)) mapping[c] = FIELD.PRICE;
   }
 

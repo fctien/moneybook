@@ -143,6 +143,38 @@ export function openStockImport({ onDone } = {}) {
               + '庫存有好幾頁時，回上一步再貼下一頁即可。',
           })
           : null,
+        buildExisting(),
+      ]);
+    }
+
+    /**
+     * 已經有持股時提供整批清除。
+     *
+     * 匯入的欄位若對錯了，錯誤會散布在每一檔上，一檔一檔刪並不實際 ——
+     * 六十幾檔要點六十幾次。直接重來比逐筆修正快得多也可靠得多。
+     */
+    function buildExisting() {
+      const held = store.stockPositions().filter((p) => p.tradeCount > 0);
+      if (!held.length) return null;
+
+      return el('p.hint', {}, [
+        el('span', { text: `目前已有 ${held.length} 檔持股。` }),
+        el('button.link-btn', {
+          type: 'button',
+          onClick: async () => {
+            const ok = await confirmDialog(
+              '清除所有持股',
+              `會刪掉 ${held.length} 檔的全部交易紀錄與股價，無法復原。`
+                + '記帳的收支資料不受影響。',
+              { danger: true, confirmText: '清除' },
+            );
+            if (!ok) return;
+            for (const p of held) await store.deleteSymbol(p.symbol);
+            toast(`已清除 ${held.length} 檔`, 'success');
+            render();
+            onDone?.();
+          },
+        }, ['全部清除，重新匯入']),
       ]);
     }
 

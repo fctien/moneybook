@@ -14,6 +14,22 @@ import { todayISO, formatDayLabel } from '../lib/dateutil.js';
 import { ACTION, estimateFee, estimateTax, byMarketValue } from '../lib/portfolio.js';
 import * as store from '../store.js';
 
+/**
+ * 平均成本的顯示格式。
+ *
+ * 這個值是「總成本 ÷ 股數」除出來的，四捨五入到兩位會變成 8.74，
+ * 而券商顯示的是 8.7423 —— 對帳時看起來就像算錯了。
+ * 因此最多留四位小數，並去掉尾端多餘的零。
+ */
+function formatUnitPrice(cents) {
+  if (!Number.isFinite(cents)) return '—';
+  const v = cents / 100;
+  const text = v.toFixed(4).replace(/\.?0+$/, '');
+  const [int, frac] = text.split('.');
+  const grouped = int.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return frac ? `${grouped}.${frac}` : grouped;
+}
+
 const ACTION_LABEL = {
   [ACTION.OPENING]: '期初持股',
   [ACTION.BUY]: '買進',
@@ -140,8 +156,8 @@ export function createStocksSection() {
           el('div.stock-row__title', { text: r.name ? `${r.symbol} ${r.name}` : r.symbol }),
           el('div.stock-row__sub', {
             text: `${r.shares} 股・`
-              + (r.costUnknown ? '成本待補' : `均價 ${formatAmount(Math.round(r.avgCost))}`)
-              + (r.price ? `　現價 ${formatAmount(r.price)}` : ''),
+              + (r.costUnknown ? '成本待補' : `均價 ${formatUnitPrice(r.avgCost)}`)
+              + (r.price ? `　現價 ${formatUnitPrice(r.price)}` : ''),
           }),
         ]),
         el('div.stock-row__right', {}, [
@@ -236,7 +252,7 @@ export function createStocksSection() {
 
       body.append(el('div.stat-row', {}, [
         ['股數', String(row.shares)],
-        ['均價', formatAmount(Math.round(row.avgCost))],
+        ['均價', row.costUnknown ? '待補' : formatUnitPrice(row.avgCost)],
         ['市值', row.marketValue === null ? '—' : formatAmount(row.marketValue)],
       ].map(([l, v]) => el('div.stat', {}, [
         el('div.stat__label', { text: l }),
