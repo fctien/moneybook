@@ -30,6 +30,12 @@ function formatUnitPrice(cents) {
   return frac ? `${grouped}.${frac}` : grouped;
 }
 
+/** 每股金額（分）轉成輸入框用的文字，最多四位小數且不留尾端的零 */
+function unitText(cents) {
+  if (!Number.isFinite(cents)) return '';
+  return (cents / 100).toFixed(4).replace(/\.?0+$/, '');
+}
+
 const ACTION_LABEL = {
   [ACTION.OPENING]: '期初持股',
   [ACTION.BUY]: '買進',
@@ -281,29 +287,28 @@ export function createStocksSection() {
         rowBtn('💰', '現金股利', () => openTradeEditor(symbol, ACTION.DIVIDEND, rerender)),
         rowBtn('🎁', '股票股利', () => openTradeEditor(symbol, ACTION.STOCK_DIV, rerender)),
         rowBtn('🏷', '更新股價', () => openQuoteEditor(symbol, rerender)),
+        rowBtn('✏️', '修改代號與名稱', () => openSymbolEditor(symbol, rerender)),
       ]));
 
       // 交易明細
       const trades = [...store.tradesOf(symbol)].sort((a, b) => (a.date < b.date ? 1 : -1));
       body.append(el('div.section-head', {}, [el('h2.section-head__title', { text: `交易紀錄（${trades.length}）` })]));
 
+      body.append(el('p.hint', { text: '點任何一筆可以修改或刪除。' }));
+
       for (const t of trades) {
-        body.append(el('div.trade-row', {}, [
+        body.append(el('button.trade-row.trade-row--tappable', {
+          type: 'button',
+          onClick: () => openTradeEditor(symbol, t.action, rerender, t),
+        }, [
           el('div.trade-row__main', {}, [
             el('div.trade-row__title', { text: `${ACTION_LABEL[t.action] ?? t.action}` }),
-            el('div.trade-row__sub', { text: formatDayLabel(t.date) }),
+            el('div.trade-row__sub', {
+              text: formatDayLabel(t.date) + (t.note ? `・${t.note}` : ''),
+            }),
           ]),
           el('div.trade-row__amount', { text: describeTrade(t) }),
-          el('button.icon-btn', {
-            type: 'button',
-            'aria-label': '刪除這筆',
-            onClick: async () => {
-              const ok = await confirmDialog('刪除這筆交易', `${formatDayLabel(t.date)} ${ACTION_LABEL[t.action]}`, { danger: true });
-              if (!ok) return;
-              await store.deleteStockTrade(t.id);
-              rerender();
-            },
-          }, ['✕']),
+          el('span.row__chevron', { text: '›' }),
         ]));
       }
 
@@ -330,22 +335,94 @@ export function createStocksSection() {
 
   // ---------------------------------------------------------------- 交易輸入
 
-  function openTradeEditor(symbol, action, onDone) {
-    openSheet(`${symbol}　${ACTION_LABEL[action]}`, (body, close) => {
+  /**
+   * 新增或修改一筆交易。
+   *
+   * 傳入 existing 就是編輯模式 —— 輸入錯了要能改回來，
+   * 只能刪掉重建的話，使用者得重新回想當初填了什麼。
+   *
+   * 期初持股刻意用「每股成本／成本總額」兩個欄位而不是「價格＋手續費」：
+   * 券商顯示的就是這兩個數字，這樣才對得起來。兩者雙向連動，
+   * 實際儲存時把除不盡的餘數放進 fee，總成本因此能精確還原。
+   */
+  function openTradeEditor(symbol, action, onDone, existing = null) {
+    const editing = Boolean(existing);
+    const title = `${symbol}　${editing ? '修改' : ''}${ACTION_LABEL[action]}`;
+
+    openSheet(title, (body, close) => {
       const isCash = action === ACTION.DIVIDEND;
       const isStockDiv = action === ACTION.STOCK_DIV;
+      const isOpening = action === ACTION.OPENING;
+
+      const money = (cents) => (cents ? (cents / 100).toString() : '');
 
       const f = {
-        date: el('input.input', { type: 'date', value: todayISO() }),
-        shares: el('input.input', { type: 'number', inputmode: 'numeric', placeholder: '股數' }),
-        price: el('input.input', { type: 'text', inputmode: 'decimal', placeholder: '每股價格' }),
-        amount: el('input.input', { type: 'text', inputmode: 'decimal', placeholder: '股利總額' }),
-        fee: el('input.input', { type: 'text', inputmode: 'decimal', placeholder: '自動試算' }),
-        tax: el('input.input', { type: 'text', inputmode: 'decimal', placeholder: '自動試算' }),
+        date: el('input.input', { type: 'date', value: existing?.date ?? todayISO() }),
+        shares: el('input.input', {
+          type: 'number', inputmode: 'numeric', placeholder: '股數',
+          value: existing?.shares ? String(existing.shares) : '',
+        }),
+        price: el('input.input', {
+          type: 'text', inputmode: 'decimal', placeholder: '每股價格',
+          value: money(existing?.price),
+        }),
+        amount: el('input.input', {
+          type: 'text', inputmode: 'decimal', placeholder: '股利總額',
+          value: money(existing?.amount),
+        }),
+        fee: el('input.input', {
+          type: 'text', inputmode: 'decimal', placeholder: '自動試算',
+          value: money(existing?.fee),
+        }),
+        tax: el('input.input', {
+          type: 'text', inputmode: 'decimal', placeholder: '自動試算',
+          value: money(existing?.tax),
+        }),
+        unitCost: el('input.input', { type: 'text', inputmode: 'decimal', placeholder: '每股成本' }),
+        totalCost: el('input.input', { type: 'text', inputmode: 'decimal', placeholder: '成本總額' }),
+        note: el('input.input', {
+          type: 'text', placeholder: '備註（選填）', maxlength: '100',
+          value: existing?.note ?? '',
+        }),
       };
 
-      // 手續費與證交稅依成交金額自動帶入，但保留讓使用者覆寫 —— 每家券商折扣不同
+      // 期初持股：帶入現有的成本，兩個欄位互相換算
+      if (isOpening && existing) {
+        const total = existing.shares * existing.price + (existing.fee ?? 0);
+        f.totalCost.value = (total / 100).toString();
+        // 每股成本最多四位小數，與券商的顯示一致。
+        // 成本總額才是寫入時的依據，所以這裡的截短不會讓數字失真。
+        if (existing.shares > 0) f.unitCost.value = unitText(total / existing.shares);
+      }
+
+      let syncing = false;
+      const syncFromUnit = () => {
+        if (syncing) return;
+        syncing = true;
+        const n = Number(f.shares.value);
+        const u = parseAmount(f.unitCost.value);
+        if (Number.isFinite(n) && n > 0 && u !== null) f.totalCost.value = ((u * n) / 100).toString();
+        syncing = false;
+      };
+      const syncFromTotal = () => {
+        if (syncing) return;
+        syncing = true;
+        const n = Number(f.shares.value);
+        const t = parseAmount(f.totalCost.value);
+        if (Number.isFinite(n) && n > 0 && t !== null) f.unitCost.value = unitText(t / n);
+        syncing = false;
+      };
+      f.unitCost.addEventListener('input', syncFromUnit);
+      f.totalCost.addEventListener('input', syncFromTotal);
+      f.shares.addEventListener('input', () => {
+        if (f.totalCost.value) syncFromTotal();
+        else syncFromUnit();
+      });
+
+      // 手續費與證交稅依成交金額自動帶入，但保留讓使用者覆寫 —— 每家券商折扣不同。
+      // 編輯既有紀錄時不覆蓋原本的值，否則使用者填過的數字會被蓋掉。
       const autoFill = () => {
+        if (editing) return;
         const shares = Number(f.shares.value);
         const price = parseAmount(f.price.value);
         if (!Number.isInteger(shares) || shares <= 0 || price === null || price <= 0) return;
@@ -357,15 +434,20 @@ export function createStocksSection() {
       f.price.addEventListener('input', autoFill);
 
       body.append(field('日期', f.date));
+
       if (isCash) {
         body.append(field('股利總額', f.amount));
+      } else if (isOpening) {
+        body.append(
+          field('股數', f.shares),
+          field('每股成本', f.unitCost),
+          field('成本總額', f.totalCost),
+          el('p.hint', { text: '兩個成本欄位會互相換算，填任一個即可。留白代表成本待補，該檔不會顯示損益。' }),
+        );
       } else {
         body.append(field('股數', f.shares));
         if (!isStockDiv) {
-          body.append(
-            field('每股價格', f.price),
-            field('手續費', f.fee),
-          );
+          body.append(field('每股價格', f.price), field('手續費', f.fee));
           if (action === ACTION.SELL) body.append(field('證交稅', f.tax));
           body.append(el('p.hint', { text: '手續費 0.1425%、證交稅 0.3% 會自動試算，可依券商折扣自行修改。' }));
         } else {
@@ -373,30 +455,112 @@ export function createStocksSection() {
         }
       }
 
+      body.append(field('備註', f.note));
+
       body.append(el('div.sheet__actions', {}, [
+        editing
+          ? el('button.btn.btn--ghost.is-danger', {
+            type: 'button',
+            onClick: async () => {
+              const ok = await confirmDialog('刪除這筆交易', `${formatDayLabel(existing.date)} ${ACTION_LABEL[action]}`, { danger: true });
+              if (!ok) return;
+              await store.deleteStockTrade(existing.id);
+              toast('已刪除', 'success');
+              close();
+              onDone?.();
+            },
+          }, ['刪除'])
+          : null,
         el('button.btn.btn--primary', {
           type: 'button',
           onClick: async () => {
+            const shares = Number(f.shares.value) || 0;
             const payload = {
+              // 帶上原本的 id 才是修改，否則會多出一筆
+              id: existing?.id,
+              createdAt: existing?.createdAt,
               date: f.date.value || todayISO(),
               symbol,
+              name: existing?.name ?? '',
               action,
-              shares: Number(f.shares.value) || 0,
+              shares,
               price: parseAmount(f.price.value) ?? 0,
               fee: parseAmount(f.fee.value) ?? 0,
               tax: parseAmount(f.tax.value) ?? 0,
               amount: parseAmount(f.amount.value) ?? 0,
+              note: f.note.value.trim(),
             };
+
+            if (isOpening) {
+              const total = parseAmount(f.totalCost.value);
+              if (total === null) {
+                // 成本留白：標成待補，不會顯示憑空編出來的損益
+                payload.price = 0;
+                payload.fee = 0;
+                payload.costUnknown = true;
+              } else if (shares > 0) {
+                // 除不盡的餘數放進 fee，總成本才能精確還原
+                payload.price = Math.floor(total / shares);
+                payload.fee = total - payload.price * shares;
+                payload.costUnknown = false;
+              }
+            }
+
             const r = await store.saveStockTrade(payload);
             if (!r.ok) return toast(r.error, 'error');
 
             haptic(15);
-            toast('已記錄', 'success');
+            toast(editing ? '已更新' : '已記錄', 'success');
             close();
             onDone?.();
           },
-        }, ['記錄']),
+        }, [editing ? '儲存修改' : '記錄']),
       ]));
+    });
+  }
+
+  /** 修改代號與名稱 —— 匯入時查表可能認錯，要能改回來 */
+  function openSymbolEditor(symbol, onDone) {
+    const trades = store.tradesOf(symbol);
+    const current = trades.find((t) => t.name)?.name ?? '';
+
+    openSheet(`${symbol}　修改代號與名稱`, (body, close) => {
+      const f = {
+        symbol: el('input.input', { type: 'text', value: symbol, maxlength: '12' }),
+        name: el('input.input', { type: 'text', value: current, maxlength: '20', placeholder: '名稱（選填）' }),
+      };
+
+      body.append(
+        field('股票代號', f.symbol),
+        field('名稱', f.name),
+        el('p.hint', { text: `會一併更新這一檔的 ${trades.length} 筆交易紀錄。` }),
+        el('div.sheet__actions', {}, [
+          el('button.btn.btn--primary', {
+            type: 'button',
+            onClick: async () => {
+              const next = f.symbol.value.trim().toUpperCase();
+              if (!next) return toast('請輸入股票代號', 'error');
+
+              const quote = store.state.quotes[symbol];
+
+              // 交易紀錄的 id 不變，只換上面的代號 —— 這是「修改」不是「搬移」。
+              // 先更新再依 id 刪除的話，剛改好的那幾筆會被自己刪掉。
+              for (const tr of trades) {
+                await store.saveStockTrade({ ...tr, symbol: next, name: f.name.value.trim() });
+              }
+
+              if (next !== symbol && quote) {
+                await store.setQuote(next, quote.close, { date: quote.date, source: quote.source });
+                await store.deleteQuote(symbol);
+              }
+
+              toast('已更新', 'success');
+              close();
+              onDone?.();
+            },
+          }, ['儲存']),
+        ]),
+      );
     });
   }
 
@@ -450,6 +614,11 @@ export function createStocksSection() {
   function describeTrade(t) {
     if (t.action === ACTION.DIVIDEND) return formatCurrency(t.amount);
     if (t.action === ACTION.STOCK_DIV) return `+${t.shares} 股`;
+    if (t.action === ACTION.OPENING) {
+      // 期初持股的單價是由總成本除出來的，直接顯示總額比較對得上券商
+      const total = t.shares * t.price + (t.fee ?? 0);
+      return `${t.shares} 股　${total ? formatAmount(total) : '成本待補'}`;
+    }
     const sign = t.action === ACTION.SELL ? '-' : '+';
     return `${sign}${t.shares} 股　${formatAmount(t.price)}`;
   }

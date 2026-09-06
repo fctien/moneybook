@@ -1142,3 +1142,12 @@ button { cursor: pointer; }
 }
 
 .import-row__symbol { margin-top: 8px; }
+
+.trade-row--tappable {
+  width: 100%;
+  border: none;
+  background: none;
+  color: var(--c-text);
+  text-align: left;
+  cursor: pointer;
+}

@@ -285,6 +285,13 @@ export async function setQuote(symbol, closeCents, { date = todayISO(), source =
   return row;
 }
 
+/** 移除某一檔的報價（改代號時把舊的清掉，免得留下對不到任何持股的孤兒） */
+export async function deleteQuote(symbol) {
+  await db.remove(db.STORE.quotes, symbol);
+  delete state.quotes[symbol];
+  notify();
+}
+
 /** 目前所有持股部位（由交易紀錄推算，不另外儲存） */
 export function stockPositions() {
   return computePositions(state.stockTrades);
