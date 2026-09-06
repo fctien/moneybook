@@ -241,6 +241,7 @@ export async function saveStockTrade(input) {
   if (i >= 0) state.stockTrades[i] = result.value;
   else state.stockTrades.push(result.value);
 
+  await syncStockValueToAccount();
   notify();
   return result;
 }
@@ -248,6 +249,7 @@ export async function saveStockTrade(input) {
 export async function deleteStockTrade(id) {
   await db.remove(db.STORE.stockTrades, id);
   state.stockTrades = state.stockTrades.filter((t) => t.id !== id);
+  await syncStockValueToAccount();
   notify();
 }
 
@@ -259,6 +261,7 @@ export async function deleteSymbol(symbol) {
 
   state.stockTrades = state.stockTrades.filter((t) => t.symbol !== symbol);
   delete state.quotes[symbol];
+  await syncStockValueToAccount();
   notify();
   return ids.length;
 }
@@ -281,8 +284,45 @@ export async function setQuote(symbol, closeCents, { date = todayISO(), source =
   };
   await db.put(db.STORE.quotes, row);
   state.quotes[row.symbol] = row;
+  await syncStockValueToAccount();
   notify();
   return row;
+}
+
+/** 哪一個帳戶要接收股票市值。空字串代表不計入淨資產。 */
+export const STOCK_ACCOUNT_KEY = 'stockAccountId';
+
+/**
+ * 把股票市值同步到指定的帳戶。
+ *
+ * 用「綁定一個帳戶」而不是直接把市值加進淨資產，是為了避免重複計算 ——
+ * 多數人早就用「手動估值」開了一個證券帳戶，兩邊各算一次，
+ * 淨資產會憑空多出一份，而且使用者不會發現。
+ *
+ * 只把「有股價」的部位算進去。缺股價的那幾檔會回報出來，
+ * 讓畫面能講清楚這個數字少了什麼 —— 少算幾檔卻不說，
+ * 比沒有數字更糟。
+ *
+ * @returns {{synced:boolean, value:number, missing:string[]}}
+ */
+export async function syncStockValueToAccount() {
+  const accountId = getSetting(STOCK_ACCOUNT_KEY, '');
+  const summary = portfolioSummary();
+  const missing = summary.missingQuotes;
+
+  if (!accountId) return { synced: false, value: summary.marketValue, missing };
+
+  const account = state.accounts.find((a) => a.id === accountId);
+  // 帳戶被刪掉或改成自動累算了，就把設定清掉，免得一直對著不存在的目標寫
+  if (!account || account.valuationMode !== 'manual') {
+    await setSetting(STOCK_ACCOUNT_KEY, '');
+    return { synced: false, value: summary.marketValue, missing };
+  }
+
+  if (account.manualValue !== summary.marketValue) {
+    await saveAccount({ ...account, manualValue: summary.marketValue });
+  }
+  return { synced: true, value: summary.marketValue, missing };
 }
 
 /** 移除某一檔的報價（改代號時把舊的清掉，免得留下對不到任何持股的孤兒） */

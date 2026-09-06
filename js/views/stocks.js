@@ -101,7 +101,14 @@ const ACTION_LABEL = {
   [ACTION.STOCK_DIV]: '股票股利',
 };
 
-export function createStocksSection() {
+/**
+ * 股票區塊。
+ *
+ * @param {object} [opts]
+ * @param {Function} [opts.onChange] 股票資料變動後呼叫。連結帳戶時市值會寫進該帳戶，
+ *   淨資產與帳戶列表因此要跟著重畫 —— 光重畫本區塊，上方的數字會停在舊值。
+ */
+export function createStocksSection({ onChange } = {}) {
   const node = el('section.stocks');
   const refs = {};
 
@@ -137,6 +144,7 @@ export function createStocksSection() {
     const s = store.portfolioSummary();
     renderSummary(s);
     renderList(s);
+    onChange?.();
   }
 
   // ---------------------------------------------------------------- 總覽
@@ -190,14 +198,83 @@ export function createStocksSection() {
       }));
     }
 
-    // 目前刻意不把股票市值加進上方的淨資產。
-    // 多數人早就用「手動估值」開了一個證券帳戶，若這裡再自動加一次就會重複計算，
-    // 而重複計算的淨資產比沒有數字更危險 —— 使用者不會發現自己多算了一份。
-    // 等之後能自動抓股價時，會改成由這裡直接更新那個帳戶的估值。
-    refs.summary.append(el('p.hint', {
-      text: '股票市值目前不會自動計入上方的淨資產，避免與「手動估值」的證券帳戶重複計算。'
-        + '請自行把上面的市值填進該帳戶。',
-    }));
+    refs.summary.append(buildNetWorthLink(s));
+  }
+
+  /**
+   * 「計入淨資產」的設定。
+   *
+   * 不直接把市值加進淨資產，而是綁定一個「手動估值」的帳戶、由這裡覆寫它的金額。
+   * 多數人早就開了一個證券帳戶，兩邊各算一次的話淨資產會憑空多出一份，
+   * 而且使用者不會發現自己多算了。綁定帳戶就沒有這個問題 ——
+   * 那個帳戶的數字本來就只有一個來源。
+   */
+  function buildNetWorthLink(s) {
+    const linkedId = store.getSetting(store.STOCK_ACCOUNT_KEY, '');
+    const linked = store.state.accounts.find((a) => a.id === linkedId);
+
+    if (!linked) {
+      return el('p.hint', {}, [
+        el('span', { text: '股票市值目前不計入上方的淨資產。' }),
+        el('button.link-btn', { type: 'button', onClick: () => openLinkPicker() }, ['計入淨資產']),
+      ]);
+    }
+
+    return el('p.hint', {}, [
+      el('span', {
+        text: `市值已自動寫入「${linked.name}」，計入淨資產。`
+          + (s.missingQuotes.length ? `（${s.missingQuotes.length} 檔沒有股價，未含在內）` : ''),
+      }),
+      el('button.link-btn', {
+        type: 'button',
+        onClick: async () => {
+          await store.setSetting(store.STOCK_ACCOUNT_KEY, '');
+          toast('已取消連結，該帳戶的金額請自行維護', 'info', 3600);
+          refresh();
+        },
+      }, ['取消']),
+    ]);
+  }
+
+  function openLinkPicker() {
+    const manual = store.state.accounts.filter((a) => !a.archived && a.valuationMode === 'manual');
+
+    openSheet('計入淨資產', (body, close) => {
+      body.append(el('p.sheet__message', {
+        text: '選一個「手動估值」的帳戶，股票市值會自動寫進去，跟著算進淨資產。'
+          + '之後每次交易或更新股價都會同步，不必再自己填。',
+      }));
+
+      const pick = async (account) => {
+        await store.setSetting(store.STOCK_ACCOUNT_KEY, account.id);
+        const r = await store.syncStockValueToAccount();
+        toast(r.synced ? `已寫入「${account.name}」` : '設定完成', 'success');
+        close();
+        refresh();
+      };
+
+      if (manual.length) {
+        body.append(el('div.row-list', {}, manual.map((a) => rowBtn('🏦', a.name, () => pick(a)))));
+        body.append(el('p.hint', {
+          text: '選定的帳戶原本填的金額會被覆蓋 —— 它之後由股票模組維護。',
+        }));
+      } else {
+        body.append(el('p.hint', { text: '還沒有「手動估值」的帳戶。' }));
+      }
+
+      body.append(el('div.sheet__actions', {}, [
+        el('button.btn.btn--ghost', {
+          type: 'button',
+          onClick: async () => {
+            const r = await store.saveAccount({
+              name: '證券帳戶', kind: 'investment', valuationMode: 'manual', manualValue: 0,
+            });
+            if (!r.ok) return toast(r.error, 'error');
+            await pick(r.value);
+          },
+        }, ['新建「證券帳戶」']),
+      ]));
+    });
   }
 
   // ---------------------------------------------------------------- 列表

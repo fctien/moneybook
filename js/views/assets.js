@@ -20,6 +20,9 @@ import { createStocksSection } from './stocks.js';
 export function createAssetsView() {
   const node = el('section.view.view--assets');
   const refs = {};
+  // 初值為 true：build() 期間股票區塊會先呼叫一次 onChange，
+  // 那時 hero 與 groups 都還沒掛上去，重畫沒有意義（而且緊接著就會 refresh()）。
+  let rendering = true;
 
   build();
 
@@ -27,7 +30,15 @@ export function createAssetsView() {
     clear(node);
     refs.hero = el('div.networth-hero');
     refs.groups = el('div.account-groups');
-    refs.stocks = createStocksSection();
+    // 股票市值可能連結到某個帳戶，變動時淨資產與帳戶列表要一起更新。
+    // rendering 旗標擋掉 refresh() → stocks.refresh() → onChange 的重複重畫。
+    refs.stocks = createStocksSection({
+      onChange: () => {
+        if (rendering) return;
+        renderHero();
+        renderGroups();
+      },
+    });
 
     node.append(
       refs.hero,
@@ -134,7 +145,9 @@ export function createAssetsView() {
         el('span.account-row__main', {}, [
           el('span.account-row__name', { text: acc.name }),
           el('span.account-row__meta', {
-            text: acc.valuationMode === 'manual' ? `${kind.label}・手動估值` : `${kind.label}・自動累算`,
+            text: acc.valuationMode === 'manual'
+              ? `${kind.label}・${acc.id === store.getSetting(store.STOCK_ACCOUNT_KEY, '') ? '由股票模組自動估值' : '手動估值'}`
+              : `${kind.label}・自動累算`,
           }),
         ]),
         el(`span.account-row__balance${balance < 0 ? '.is-expense' : ''}`, {
@@ -213,6 +226,14 @@ export function createAssetsView() {
               : '填入目前餘額作為起點，之後每筆收支會自動加減。適合現金、銀行、信用卡。',
           }),
           el('div.field__label', { text: isManual ? '目前價值' : '目前餘額（作為起算點）' }),
+          // 這個帳戶的金額由股票模組維護，手動改了下一次交易或更新股價就會被蓋回去。
+          // 不講的話使用者會以為自己改的數字沒存進去。
+          isManual && account?.id === store.getSetting(store.STOCK_ACCOUNT_KEY, '')
+            ? el('p.hint.hint--warn', {
+              text: '這個帳戶的金額由「股票投資」自動維護，手動修改會在下次交易或更新股價時被覆蓋。'
+                + '若要自己填，請先到股票區塊取消連結。',
+            })
+            : null,
           el('input.text-input.text-input--amount', {
             type: 'text',
             inputmode: 'decimal',
@@ -284,9 +305,14 @@ export function createAssetsView() {
   }
 
   function refresh() {
-    renderHero();
-    refs.stocks.refresh();
-    renderGroups();
+    rendering = true;
+    try {
+      renderHero();
+      refs.stocks.refresh();
+      renderGroups();
+    } finally {
+      rendering = false;
+    }
   }
 
   return { node, refresh };
