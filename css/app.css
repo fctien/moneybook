@@ -1151,3 +1151,5 @@ button { cursor: pointer; }
   text-align: left;
   cursor: pointer;
 }
+
+.hint--lookup { min-height: 20px; margin-top: -4px; }

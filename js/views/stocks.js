@@ -36,6 +36,63 @@ function unitText(cents) {
   return (cents / 100).toFixed(4).replace(/\.?0+$/, '');
 }
 
+/**
+ * 讓「代號」與「名稱」互相帶入。
+ *
+ * 對照表有 65 KB，只有真的開啟輸入畫面才載入，不拖慢 App 啟動。
+ *
+ * 只在目標欄位「空白」或「上次是自動填的」時才覆寫 ——
+ * 使用者自己打過的名稱不該被蓋掉，那比留白更惱人。
+ */
+function linkSymbolAndName(symbolInput, nameInput, hintEl) {
+  let auto = { symbol: false, name: false };
+  let lookup = null;
+
+  const load = async () => {
+    if (!lookup) lookup = await import('../lib/stocklookup.js');
+    return lookup;
+  };
+
+  const setHint = (text, ok = true) => {
+    if (!hintEl) return;
+    hintEl.textContent = text;
+    hintEl.classList.toggle('is-error', !ok);
+  };
+
+  symbolInput.addEventListener('input', async () => {
+    auto.symbol = false;
+    const code = symbolInput.value.trim().toUpperCase();
+    if (code.length < 4) return setHint('');
+
+    const { findBySymbol } = await load();
+    const hit = findBySymbol(code);
+    if (!hit) return setHint('查不到這個代號，可自行輸入名稱', false);
+
+    setHint(`${hit.name}・${hit.industry}`);
+    if (!nameInput.value.trim() || auto.name) {
+      nameInput.value = hit.name;
+      auto.name = true;
+    }
+  });
+
+  nameInput.addEventListener('input', async () => {
+    auto.name = false;
+    const name = nameInput.value.trim();
+    if (name.length < 2) return setHint('');
+
+    const { findByName } = await load();
+    const hit = findByName(name);
+    // 查不到時保持安靜：使用者可能只是還沒打完
+    if (!hit) return setHint('');
+
+    setHint(`${hit.symbol} ${hit.name}・${hit.industry}`);
+    if (!symbolInput.value.trim() || auto.symbol) {
+      symbolInput.value = hit.symbol;
+      auto.symbol = true;
+    }
+  });
+}
+
 const ACTION_LABEL = {
   [ACTION.OPENING]: '期初持股',
   [ACTION.BUY]: '買進',
@@ -198,12 +255,16 @@ export function createStocksSection() {
         date: el('input.input', { type: 'date', value: todayISO() }),
       };
 
+      const lookupHint = el('p.hint.hint--lookup');
+      linkSymbolAndName(f.symbol, f.name, lookupHint);
+
       body.append(
         el('p.sheet__message', {
           text: '填入目前的持股狀況即可，不必回頭補所有交易紀錄。之後的買賣再逐筆記錄。',
         }),
         field('股票代號', f.symbol),
         field('名稱', f.name),
+        lookupHint,
         field('股數', f.shares),
         field('每股平均成本', f.cost),
         field('目前股價', f.price),
@@ -530,9 +591,13 @@ export function createStocksSection() {
         name: el('input.input', { type: 'text', value: current, maxlength: '20', placeholder: '名稱（選填）' }),
       };
 
+      const lookupHint = el('p.hint.hint--lookup');
+      linkSymbolAndName(f.symbol, f.name, lookupHint);
+
       body.append(
         field('股票代號', f.symbol),
         field('名稱', f.name),
+        lookupHint,
         el('p.hint', { text: `會一併更新這一檔的 ${trades.length} 筆交易紀錄。` }),
         el('div.sheet__actions', {}, [
           el('button.btn.btn--primary', {
