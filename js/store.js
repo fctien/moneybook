@@ -13,6 +13,9 @@ import {
 } from './lib/schema.js';
 import { todayISO } from './lib/dateutil.js';
 import { computePositions, summarizePortfolio, validateTrade } from './lib/portfolio.js';
+import {
+  computeFundPositions, summarizeFunds, validateFundTrade, usedCurrencies,
+} from './lib/funds.js';
 
 export const state = {
   accounts: [],
@@ -23,6 +26,9 @@ export const state = {
   stockTrades: [],
   // 代號 → { symbol, close, date, source, updatedAt }
   quotes: {},
+  fundTrades: [],
+  // 基金代碼 → { fundId, nav, date, source, updatedAt }
+  navs: {},
   ready: false,
 };
 
@@ -289,33 +295,59 @@ export async function setQuote(symbol, closeCents, { date = todayISO(), source =
   return row;
 }
 
-/** 哪一個帳戶要接收股票市值。空字串代表不計入淨資產。 */
-export const STOCK_ACCOUNT_KEY = 'stockAccountId';
-
 /**
- * 把股票市值同步到指定的帳戶。
+ * 投資模組與帳戶的綁定。
  *
  * 用「綁定一個帳戶」而不是直接把市值加進淨資產，是為了避免重複計算 ——
- * 多數人早就用「手動估值」開了一個證券帳戶，兩邊各算一次，
+ * 多數人早就用「手動估值」開了證券或基金帳戶，兩邊各算一次，
  * 淨資產會憑空多出一份，而且使用者不會發現。
  *
- * 只把「有股價」的部位算進去。缺股價的那幾檔會回報出來，
- * 讓畫面能講清楚這個數字少了什麼 —— 少算幾檔卻不說，
- * 比沒有數字更糟。
+ * 股票與基金各綁各的帳戶：兩者在資產頁是獨立的區塊、獨立的清單，
+ * 綁在一起會讓「這個帳戶到底代表什麼」變得說不清楚。
+ */
+const MODULES = {
+  stock: {
+    key: 'stockAccountId',
+    summary: () => portfolioSummary(),
+    // 缺股價的代號，用來在畫面上講清楚這個數字少了什麼
+    missing: (s) => s.missingQuotes,
+  },
+  fund: {
+    key: 'fundAccountId',
+    summary: () => fundSummary(),
+    // 基金可能缺淨值，也可能缺匯率 —— 兩者要補的東西不一樣，但對「少算了什麼」來說是同一件事
+    missing: (s) => [...s.missingNav, ...s.missingRate],
+  },
+};
+
+/** 哪一個帳戶要接收股票市值。空字串代表不計入淨資產。 */
+export const STOCK_ACCOUNT_KEY = MODULES.stock.key;
+/** 哪一個帳戶要接收基金市值。空字串代表不計入淨資產。 */
+export const FUND_ACCOUNT_KEY = MODULES.fund.key;
+
+/**
+ * 把某個投資模組的市值同步到它綁定的帳戶。
  *
+ * 只把「算得出台幣市值」的部位算進去。算不出來的會回報出來，
+ * 讓畫面能講清楚少了什麼 —— 少算幾檔卻不說，比沒有數字更糟。
+ *
+ * @param {'stock'|'fund'} moduleName
  * @returns {{synced:boolean, value:number, missing:string[]}}
  */
-export async function syncStockValueToAccount() {
-  const accountId = getSetting(STOCK_ACCOUNT_KEY, '');
-  const summary = portfolioSummary();
-  const missing = summary.missingQuotes;
+export async function syncModuleValueToAccount(moduleName) {
+  const mod = MODULES[moduleName];
+  if (!mod) throw new Error(`未知的投資模組：${moduleName}`);
+
+  const summary = mod.summary();
+  const missing = mod.missing(summary);
+  const accountId = getSetting(mod.key, '');
 
   if (!accountId) return { synced: false, value: summary.marketValue, missing };
 
   const account = state.accounts.find((a) => a.id === accountId);
   // 帳戶被刪掉或改成自動累算了，就把設定清掉，免得一直對著不存在的目標寫
   if (!account || account.valuationMode !== 'manual') {
-    await setSetting(STOCK_ACCOUNT_KEY, '');
+    await setSetting(mod.key, '');
     return { synced: false, value: summary.marketValue, missing };
   }
 
@@ -323,6 +355,14 @@ export async function syncStockValueToAccount() {
     await saveAccount({ ...account, manualValue: summary.marketValue });
   }
   return { synced: true, value: summary.marketValue, missing };
+}
+
+export function syncStockValueToAccount() {
+  return syncModuleValueToAccount('stock');
+}
+
+export function syncFundValueToAccount() {
+  return syncModuleValueToAccount('fund');
 }
 
 /** 移除某一檔的報價（改代號時把舊的清掉，免得留下對不到任何持股的孤兒） */
@@ -342,6 +382,118 @@ export function portfolioSummary() {
   const prices = {};
   for (const [sym, q] of Object.entries(state.quotes)) prices[sym] = q.close;
   return summarizePortfolio(stockPositions(), prices);
+}
+
+// ------------------------------------------------------------- 基金
+
+export async function saveFundTrade(input) {
+  const result = validateFundTrade(input);
+  if (!result.ok) return result;
+  if (!result.value.id) result.value.id = newId();
+
+  await db.put(db.STORE.fundTrades, result.value);
+
+  const i = state.fundTrades.findIndex((t) => t.id === result.value.id);
+  if (i >= 0) state.fundTrades[i] = result.value;
+  else state.fundTrades.push(result.value);
+
+  await syncFundValueToAccount();
+  notify();
+  return result;
+}
+
+export async function deleteFundTrade(id) {
+  await db.remove(db.STORE.fundTrades, id);
+  state.fundTrades = state.fundTrades.filter((t) => t.id !== id);
+  await syncFundValueToAccount();
+  notify();
+}
+
+/** 刪除某一檔基金的全部交易紀錄（在持份列表上整檔移除時用） */
+export async function deleteFund(fundId) {
+  const ids = state.fundTrades.filter((t) => t.fundId === fundId).map((t) => t.id);
+  for (const id of ids) await db.remove(db.STORE.fundTrades, id);
+  await db.remove(db.STORE.navs, fundId);
+
+  state.fundTrades = state.fundTrades.filter((t) => t.fundId !== fundId);
+  delete state.navs[fundId];
+  await syncFundValueToAccount();
+  notify();
+  return ids.length;
+}
+
+export function fundTradesOf(fundId) {
+  return state.fundTrades.filter((t) => t.fundId === fundId);
+}
+
+/**
+ * 記錄一檔基金的最新淨值（原幣，×10^4）。
+ * source 用來區分是使用者自己填的還是自動抓的 —— 畫面上要標示資料從哪來、有多舊。
+ */
+export async function setNav(fundId, nav, { date = todayISO(), source = 'manual' } = {}) {
+  const row = {
+    fundId: String(fundId).trim(),
+    nav: Math.round(nav),
+    date,
+    source,
+    updatedAt: Date.now(),
+  };
+  await db.put(db.STORE.navs, row);
+  state.navs[row.fundId] = row;
+  await syncFundValueToAccount();
+  notify();
+  return row;
+}
+
+/** 移除某一檔的淨值（改代碼時把舊的清掉） */
+export async function deleteNav(fundId) {
+  await db.remove(db.STORE.navs, fundId);
+  delete state.navs[fundId];
+  notify();
+}
+
+/** 匯率表：幣別 → 匯率（×10^6）。手動維護，之後才做自動抓。 */
+export const FX_RATES_KEY = 'fxRates';
+
+export function fxRates() {
+  const raw = getSetting(FX_RATES_KEY, {});
+  return raw && typeof raw === 'object' ? raw : {};
+}
+
+export async function setFxRate(currency, rate) {
+  const code = String(currency).trim().toUpperCase();
+  const next = { ...fxRates(), [code]: Math.round(rate) };
+  await setSetting(FX_RATES_KEY, next);
+  await syncFundValueToAccount();
+  notify();
+  return next;
+}
+
+export async function removeFxRate(currency) {
+  const next = { ...fxRates() };
+  delete next[String(currency).trim().toUpperCase()];
+  await setSetting(FX_RATES_KEY, next);
+  await syncFundValueToAccount();
+  notify();
+  return next;
+}
+
+/** 目前所有基金持份（由交易紀錄推算，不另外儲存） */
+export function fundPositions() {
+  return computeFundPositions(state.fundTrades);
+}
+
+/** 基金組合彙總，金額一律是台幣 */
+export function fundSummary() {
+  const navs = {};
+  for (const [id, row] of Object.entries(state.navs)) navs[id] = row.nav;
+  return summarizeFunds(fundPositions(), navs, fxRates());
+}
+
+/** 目前持有、而且還沒填匯率的外幣幣別 */
+export function currenciesNeedingRate() {
+  const rates = fxRates();
+  return usedCurrencies(fundPositions()).filter((c) => !(rates[c] > 0));
 }
 
 // ------------------------------------------------------------- 設定
@@ -367,6 +519,8 @@ export function exportPayload() {
     settings: state.settings,
     stockTrades: state.stockTrades,
     quotes: state.quotes,
+    fundTrades: state.fundTrades,
+    navs: state.navs,
   };
 }
 

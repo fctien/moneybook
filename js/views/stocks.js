@@ -159,16 +159,19 @@ export function createStocksSection({ onChange } = {}) {
       return;
     }
 
+    // 四格的寬度有限，帶小數會被截斷。彙總層級不需要角分。
+    const round = (v) => formatAmount(v, { decimals: 'never' });
+
     const cells = [
-      ['市值', s.pricedCount ? formatAmount(s.marketValue) : '—'],
-      ['成本', formatAmount(s.totalCost)],
+      ['市值', s.pricedCount ? round(s.marketValue) : '—'],
+      ['成本', round(s.totalCost)],
     ];
 
     // 只有全部持股都有報價，未實現損益才是完整的數字。
     // 少算一檔卻照樣顯示總額，會讓人誤以為自己在虧損。
     if (s.complete) {
       const sign = s.unrealized >= 0 ? '+' : '';
-      cells.push(['未實現損益', `${sign}${formatAmount(s.unrealized)}`]);
+      cells.push(['未實現損益', `${sign}${round(s.unrealized)}`]);
       cells.push(['報酬率', s.returnRate === null ? '—' : `${(s.returnRate * 100).toFixed(1)}%`]);
     }
 

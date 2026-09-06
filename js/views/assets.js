@@ -16,6 +16,7 @@ import { accountBalances } from '../lib/stats.js';
 import { ACCOUNT_KINDS, accountKind } from '../lib/schema.js';
 import * as store from '../store.js';
 import { createStocksSection } from './stocks.js';
+import { createFundsSection } from './funds.js';
 
 export function createAssetsView() {
   const node = el('section.view.view--assets');
@@ -32,17 +33,18 @@ export function createAssetsView() {
     refs.groups = el('div.account-groups');
     // 股票市值可能連結到某個帳戶，變動時淨資產與帳戶列表要一起更新。
     // rendering 旗標擋掉 refresh() → stocks.refresh() → onChange 的重複重畫。
-    refs.stocks = createStocksSection({
-      onChange: () => {
-        if (rendering) return;
-        renderHero();
-        renderGroups();
-      },
-    });
+    const onModuleChange = () => {
+      if (rendering) return;
+      renderHero();
+      renderGroups();
+    };
+    refs.stocks = createStocksSection({ onChange: onModuleChange });
+    refs.funds = createFundsSection({ onChange: onModuleChange });
 
     node.append(
       refs.hero,
       refs.stocks.node,
+      refs.funds.node,
       el('div.section-head', {}, [
         el('h2.section-head__title', { text: '帳戶與資產' }),
         el('button.link-btn', { type: 'button', onClick: () => openAccountEditor(null) }, ['+ 新增']),
@@ -146,7 +148,7 @@ export function createAssetsView() {
           el('span.account-row__name', { text: acc.name }),
           el('span.account-row__meta', {
             text: acc.valuationMode === 'manual'
-              ? `${kind.label}・${acc.id === store.getSetting(store.STOCK_ACCOUNT_KEY, '') ? '由股票模組自動估值' : '手動估值'}`
+              ? `${kind.label}・${boundModule(acc.id) ? `由${boundModule(acc.id)}自動估值` : '手動估值'}`
               : `${kind.label}・自動累算`,
           }),
         ]),
@@ -156,6 +158,17 @@ export function createAssetsView() {
       ]));
     }
     return list;
+  }
+
+  /**
+   * 這個帳戶的金額是不是由某個投資模組維護的？
+   * 回傳模組名稱，沒被綁定就回 null。
+   */
+  function boundModule(accountId) {
+    if (!accountId) return null;
+    if (accountId === store.getSetting(store.STOCK_ACCOUNT_KEY, '')) return '股票投資';
+    if (accountId === store.getSetting(store.FUND_ACCOUNT_KEY, '')) return '基金投資';
+    return null;
   }
 
   /** 新增或編輯帳戶。account 為 null 時是新增。 */
@@ -226,12 +239,13 @@ export function createAssetsView() {
               : '填入目前餘額作為起點，之後每筆收支會自動加減。適合現金、銀行、信用卡。',
           }),
           el('div.field__label', { text: isManual ? '目前價值' : '目前餘額（作為起算點）' }),
-          // 這個帳戶的金額由股票模組維護，手動改了下一次交易或更新股價就會被蓋回去。
+          // 這個帳戶的金額由投資模組維護，手動改了下一次交易或更新報價就會被蓋回去。
           // 不講的話使用者會以為自己改的數字沒存進去。
-          isManual && account?.id === store.getSetting(store.STOCK_ACCOUNT_KEY, '')
+          isManual && boundModule(account?.id)
             ? el('p.hint.hint--warn', {
-              text: '這個帳戶的金額由「股票投資」自動維護，手動修改會在下次交易或更新股價時被覆蓋。'
-                + '若要自己填，請先到股票區塊取消連結。',
+              text: `這個帳戶的金額由「${boundModule(account.id)}」自動維護，`
+                + '手動修改會在下次交易或更新報價時被覆蓋。'
+                + `若要自己填，請先到${boundModule(account.id)}區塊取消連結。`,
             })
             : null,
           el('input.text-input.text-input--amount', {
@@ -309,6 +323,7 @@ export function createAssetsView() {
     try {
       renderHero();
       refs.stocks.refresh();
+      refs.funds.refresh();
       renderGroups();
     } finally {
       rendering = false;

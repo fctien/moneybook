@@ -332,7 +332,8 @@ test('buildBackup 標頭資訊正確', () => {
   assert.equal(b.schemaVersion, 1);
   assert.equal(b.exportedAt, '2026-09-01T00:00:00.000Z');
   assert.deepEqual(b.counts, {
-    accounts: 1, categories: 1, transactions: 1, snapshots: 1, stockTrades: 0,
+    accounts: 1, categories: 1, transactions: 1, snapshots: 1,
+    stockTrades: 0, fundTrades: 0,
   });
 });
 
@@ -358,15 +359,43 @@ test('備份含股票交易，還原後不會遺失', () => {
   assert.equal(round.data.quotes['2330'].close, 80000);
 });
 
-test('舊版備份沒有股票欄位也要能還原', () => {
+test('備份含基金交易，還原後不會遺失', () => {
+  // 與股票同樣的理由：新資料類型忘了放進備份，還原後會無聲少一整塊。
+  const withFunds = {
+    ...SAMPLE,
+    fundTrades: [{
+      id: 'f1', date: '2026-01-02', fundId: 'F1', name: '測試基金', currency: 'USD',
+      action: 'buy', units: 10_000_000, nav: 100_000, fxRate: 30_000_000,
+      fee: 0, amount: 0, note: '', costUnknown: false, createdAt: 1,
+    }],
+    navs: { F1: { fundId: 'F1', nav: 120_000, date: '2026-09-01', source: 'manual' } },
+  };
+
+  const b = buildBackup(withFunds, '2026-09-01T00:00:00.000Z');
+  assert.equal(b.counts.fundTrades, 1);
+
+  const round = parseBackup(JSON.stringify(b));
+  assert.equal(round.ok, true);
+  assert.equal(round.data.fundTrades.length, 1);
+  assert.equal(round.data.fundTrades[0].currency, 'USD');
+  // 匯率若在還原時掉了，成本會從此對不起來
+  assert.equal(round.data.fundTrades[0].fxRate, 30_000_000);
+  assert.equal(round.data.navs.F1.nav, 120_000);
+});
+
+test('舊版備份沒有股票或基金欄位也要能還原', () => {
   const old = buildBackup(SAMPLE, '2026-09-01T00:00:00.000Z');
   delete old.data.stockTrades;
   delete old.data.quotes;
+  delete old.data.fundTrades;
+  delete old.data.navs;
 
   const r = parseBackup(JSON.stringify(old));
   assert.equal(r.ok, true, '舊備份不該被拒絕');
   assert.deepEqual(r.data.stockTrades, []);
   assert.deepEqual(r.data.quotes, {});
+  assert.deepEqual(r.data.fundTrades, []);
+  assert.deepEqual(r.data.navs, {});
 });
 
 test('parseBackup 拒絕壞檔案', () => {
