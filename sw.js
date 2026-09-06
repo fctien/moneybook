@@ -33,6 +33,7 @@ const APP_SHELL = [
   './js/lib/install.js',
   './js/lib/invoice.js',
   './js/lib/portfolio.js',
+  './js/lib/funds.js',
   './js/lib/qrscan.js',
   // jsQR 有 250 KB，是 app shell 裡最大的一支。仍然預先快取，
   // 否則第一次在離線狀態下按「掃發票」會直接失敗。

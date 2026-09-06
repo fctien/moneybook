@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MoneyBook 基金模組規劃</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --surface: #fff; --border: #e3e6ea; --text: #1a1d21;
+    --muted: #656d76; --accent: #2563eb; --ok: #16a34a; --bad: #dc2626;
+    --warn: #b45309; --warn-bg: #fef3c7; --code-bg: #f1f3f5;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1115; --surface: #171a1f; --border: #2b3038; --text: #e6e8eb;
+      --muted: #9aa4b0; --accent: #60a5fa; --ok: #4ade80; --bad: #f87171;
+      --warn: #fbbf24; --warn-bg: #3a2a06; --code-bg: #1e2229;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 32px 20px 64px; background: var(--bg); color: var(--text);
+    font-family: system-ui, -apple-system, "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", sans-serif;
+    line-height: 1.7; font-size: 15px;
+  }
+  .wrap { max-width: 880px; margin: 0 auto; }
+  header { border-bottom: 2px solid var(--accent); padding-bottom: 16px; margin-bottom: 28px; }
+  h1 { font-size: 25px; margin: 0 0 6px; }
+  .meta { color: var(--muted); font-size: 13px; }
+  h2 { font-size: 18px; margin: 36px 0 12px; padding-left: 11px; border-left: 4px solid var(--accent); }
+  h3 { font-size: 15px; margin: 22px 0 8px; }
+  section { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 18px 22px; margin-bottom: 18px; }
+  table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 14px; }
+  th, td { border: 1px solid var(--border); padding: 8px 11px; text-align: left; vertical-align: top; }
+  th { background: var(--code-bg); font-weight: 600; }
+  code { background: var(--code-bg); padding: 2px 5px; border-radius: 4px; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 13px; }
+  pre { background: var(--code-bg); padding: 12px 14px; border-radius: 8px; overflow-x: auto; font-size: 13px; line-height: 1.5; }
+  pre code { background: none; padding: 0; }
+  ul, ol { padding-left: 22px; }
+  li { margin: 5px 0; }
+  .pill { display: inline-block; border-radius: 999px; padding: 2px 11px; font-size: 12px; font-weight: 600; }
+  .pill.ok { background: rgba(22,163,74,.14); color: var(--ok); }
+  .pill.bad { background: rgba(220,38,38,.14); color: var(--bad); }
+  .note { background: var(--warn-bg); color: var(--warn); border-radius: 8px; padding: 11px 14px; font-size: 14px; margin: 14px 0; }
+  .muted { color: var(--muted); }
+  .decided { border-left: 4px solid var(--ok); padding-left: 14px; margin: 16px 0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>MoneyBook 基金模組 &mdash; 實作規劃</h1>
+  <div class="meta">
+    2026-09-06 擬定&nbsp;·&nbsp;基準版本 <code>v1.14.0</code>&nbsp;·&nbsp;狀態：<strong>待確認</strong>
+  </div>
+</header>
+
+<section>
+<h2>0. 需求</h2>
+<ol>
+  <li>基金要能像股票一樣看到<strong>成本與報酬率</strong></li>
+  <li>台幣計價與外幣計價的基金都要能記</li>
+  <li>股票與基金<strong>分開管理</strong>，但都計入總資產</li>
+</ol>
+<p class="muted">
+債券不在這一版：手上若是債券 ETF（00679B、00687B 等），現有股票模組已經能記，
+代號清單裡就有；直接持有的海外債另議（見第 7 節）。
+</p>
+</section>
+
+<section>
+<h2>1. 三個架構決策</h2>
+
+<div class="decided">
+<h3>1.1 基金自成一個模組，不共用股票的引擎</h3>
+<p>
+新寫 <code>js/lib/funds.js</code>，不改 <code>portfolio.js</code>。理由：
+</p>
+<ul>
+  <li><code>portfolio.js</code> 強制 <code>Number.isInteger(shares)</code> ——
+      台股本來就是整數股，這個限制是一層防護，不該為了基金拆掉</li>
+  <li>單位語意不同：<strong>股 vs 單位</strong>、<strong>股價 vs 淨值</strong>。
+      硬合併會讓兩邊的欄位名稱都變模糊，日後看不出哪個數字該是什麼</li>
+  <li>現有 210 項測試有一大半壓在 <code>portfolio.js</code> 上，動它是純粹的回歸風險</li>
+</ul>
+<p>
+共用的是<strong>算式</strong>不是檔案：加權平均、賣出時依比例攤提成本，
+兩邊各自實作同一套邏輯，各自有測試。
+</p>
+</div>
+
+<div class="decided">
+<h3>1.2 幣別只活在基金模組裡面</h3>
+<p>
+這是整份計畫最重要的一條。<strong>不要把幣別推進記帳、帳戶、統計、報表</strong> ——
+那些地方全部假設台幣，一旦引入幣別，每一個加總都要處理換匯，改動面積會失控。
+</p>
+<p>
+基金部位自己帶幣別，估值時換成台幣，<strong>對外只吐台幣市值</strong>。
+邊界跟股票模組一樣是「市值（台幣）→ 寫回綁定帳戶」，這條邊界 v1.14.0 已經驗證可行。
+</p>
+</div>
+
+<div class="decided">
+<h3>1.3 成本記原幣＋當時匯率，不記台幣總額</h3>
+<p>
+外幣基金的「報酬率」有兩個都正確但不同的答案：
+</p>
+<table>
+<tr><th>算法</th><th>回答的問題</th><th>誰在用</th></tr>
+<tr><td>原幣報酬率</td><td>這檔基金本身績效如何</td><td>基金公司對帳單</td></tr>
+<tr><td>台幣報酬率</td><td>我到底賺了多少台幣</td><td>你真正在意的</td></tr>
+</table>
+<p>
+差額就是匯兌損益。只存台幣總成本會<strong>永久失去</strong>算出原幣績效的能力；
+存「原幣金額 ＋ 申購當日匯率」則兩個都算得出來。多存一個數字換不可逆的資訊，划算。
+</p>
+</div>
+</section>
+
+<section>
+<h2>2. 資料模型</h2>
+<p>沿用「部位由交易推算、不存第二份」的原則。IndexedDB 新增一個 <code>fundTrades</code> store：</p>
+<pre><code>{
+  id, date,
+  fundId,     // 使用者自訂代碼（基金沒有像股票代號那樣的全民統一編號）
+  name,       // 基金全名
+  currency,   // 'TWD' | 'USD' | 'CNY' | ...
+  action,     // opening | buy | sell | dividend | reinvest
+  units,      // 單位數 × 10^4（4 位小數）
+  nav,        // 每單位淨值 × 10^4（原幣）
+  fxRate,     // 交易當日匯率 × 10^6（原幣→台幣）；台幣基金固定 1000000
+  fee,        // 手續費（原幣，分）
+  amount,     // 配息金額（原幣，分）
+  note, createdAt
+}</code></pre>
+
+<h3>2.1 部位彙總</h3>
+<p>每檔基金累加三個數字，賣出時三個一起依比例攤：</p>
+<table>
+<tr><th>欄位</th><th>意義</th></tr>
+<tr><td><code>units</code></td><td>目前持有單位數</td></tr>
+<tr><td><code>totalCostForeign</code></td><td>原幣總成本（分）</td></tr>
+<tr><td><code>totalCostTWD</code></td><td>台幣總成本（分）＝ Σ 每筆的 units × nav × 當時匯率</td></tr>
+</table>
+
+<h3>2.2 數值精度：一個會靜靜爆掉的陷阱</h3>
+<div class="note">
+單位數與淨值若都存成高倍數整數再直接相乘，會超出 JavaScript 安全整數範圍。
+以 10 萬單位、淨值 15 美元為例：若 units 用 10<sup>4</sup> 倍、nav 用 10<sup>6</sup> 倍，
+乘積約 1.5&nbsp;×&nbsp;10<sup>16</sup>，已經大於 <code>Number.MAX_SAFE_INTEGER</code>（約 9&nbsp;×&nbsp;10<sup>15</sup>）。
+從那一刻起數字會開始無聲地失真。
+</div>
+<p>
+因此：<strong>units 與 nav 各存 10<sup>4</sup> 倍整數，相乘時先還原成一般數值，
+結果立刻 <code>Math.round</code> 成「分」的整數再累加。</strong>
+中間過程容許浮點、結果一律落回整數 —— 這與現有
+「<code>totalCost</code> 是整數分、<code>avgCost</code> 只是顯示用浮點」是同一種紀律。
+</p>
+<p class="muted">
+同樣的界線要寫成測試：極端值（千萬單位 × 淨值 1000）必須仍在安全範圍內。
+</p>
+</section>
+
+<section>
+<h2>3. 匯率怎麼來</h2>
+<p>
+先<strong>手動維護</strong>，跟現在的股價一樣。設定裡存一張表：
+</p>
+<pre><code>fxRates: { USD: 32500000, CNY: 4520000 }   // × 10^6</code></pre>
+<div class="note">
+<strong>沒有匯率就不計入，絕對不能預設 1.0。</strong>
+把 10 萬美元當成 10 萬台幣，畫面上會是一個看起來很正常、實際上錯了 32 倍的數字 ——
+這正是整個專案一路在避免的那種錯法。缺匯率的部位比照缺股價處理：
+算不出台幣市值就標示「N 檔缺匯率，未計入」。
+</div>
+<p>
+自動抓匯率留到之後，跟股票的 FinMind 自動抓價同一階段做（同樣預設關閉）。
+</p>
+</section>
+
+<section>
+<h2>4. 總資產怎麼併進去</h2>
+<p>
+沿用 v1.14.0 的綁定機制，但<strong>股票與基金各綁各的帳戶</strong>：
+</p>
+<table>
+<tr><th>模組</th><th>設定鍵</th><th>建議帳戶</th></tr>
+<tr><td>股票投資</td><td><code>stockAccountId</code></td><td>證券帳戶</td></tr>
+<tr><td>基金投資</td><td><code>fundAccountId</code></td><td>基金帳戶</td></tr>
+</table>
+<p>
+兩個都是「手動估值」帳戶，都進淨資產，但在資產頁是<strong>兩個獨立區塊、兩份持股清單</strong>。
+一個數字仍然只有一個來源，也不會互相干擾。
+</p>
+<p>
+既然綁定機制現在要服務兩個模組，<code>syncStockValueToAccount()</code> 會改寫成
+以模組為參數的通用版本，避免兩份幾乎相同的程式各自長歪。
+</p>
+</section>
+
+<section>
+<h2>5. 介面</h2>
+<h3>5.1 定期定額會把列表撐爆</h3>
+<p>
+一檔基金扣款三年就是 36 筆買進。列表預設只顯示<strong>部位彙總</strong>
+（單位數、平均成本、現值、報酬率），點開才展開交易明細 ——
+與現在股票區塊的做法一致。
+</p>
+<h3>5.2 每檔要顯示的數字</h3>
+<ul>
+  <li>單位數、平均成本（原幣）、目前淨值</li>
+  <li>市值（台幣）</li>
+  <li><strong>原幣報酬率</strong> 與 <strong>台幣報酬率</strong>兩個都給，差額即匯兌損益</li>
+  <li>台幣基金只顯示一個報酬率，不必為了整齊硬塞兩個一模一樣的數字</li>
+</ul>
+</section>
+
+<section>
+<h2>6. 分階段實作</h2>
+<table>
+<tr><th>階段</th><th>內容</th><th>版本</th></tr>
+<tr><td>1</td><td><code>funds.js</code> 引擎＋單元測試（含精度極端值），完全不碰介面</td><td>v1.15.0</td></tr>
+<tr><td>2</td><td>匯率表：設定頁手動維護，缺匯率的處理與提示</td><td>v1.15.0</td></tr>
+<tr><td>3</td><td>資產頁「基金投資」區塊：新增／編輯／刪除、部位列表、綁定帳戶</td><td>v1.16.0</td></tr>
+<tr><td>4</td><td>綁定機制通用化，股票與基金共用同一套同步程式</td><td>v1.16.0</td></tr>
+<tr><td>5</td><td>定期定額摺疊、對帳單 CSV 匯入</td><td>之後</td></tr>
+</table>
+<p class="muted">
+階段 1、2 沒有介面，但有測試 —— 引擎對了再做畫面，比較不會做到一半發現資料模型不夠用。
+</p>
+</section>
+
+<section>
+<h2>7. 債券</h2>
+<p>目前的建議是<strong>先不做部位級的債券模組</strong>：</p>
+<ul>
+  <li><strong>債券 ETF</strong>（00679B 等）：現有股票模組已經完全支援，代號清單裡就有</li>
+  <li><strong>債券型基金</strong>：就是基金，走這份計畫</li>
+  <li><strong>直接持有的海外債</strong>：報價是面額的百分比、要算應計利息、到期自動還本 ——
+      每一項都是可能靜靜算錯的地方，而且散戶直接持有的門檻通常是 10 萬美元起。
+      先用「手動估值」帳戶記總額，真的有需要再單獨規劃</li>
+</ul>
+</section>
+
+<section>
+<h2>8. 待確認</h2>
+<ol>
+  <li>基金要用什麼當識別碼？基金沒有像股票代號那樣的全民統一編號，
+      打算讓使用者自己取（例如「安聯台灣科技」），你也可以填基金統編</li>
+  <li>配息要記成現金入帳，還是配息再投資（轉成單位數）？兩種都會做，
+      想確認你手上以哪一種為主</li>
+  <li>手續費：台幣基金常見「申購手續費內扣」，要不要跟股票一樣併進成本？
+      （預設併進，與股票一致）</li>
+</ol>
+</section>
+
+<footer class="meta" style="margin-top:32px;padding-top:14px;border-top:1px solid var(--border)">
+  MoneyBook 基金模組規劃 &mdash; 2026-09-06
+</footer>
+
+</div>
+</body>
+</html>
