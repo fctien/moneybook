@@ -1311,7 +1311,31 @@ FinMind 配額用完時 HTTP 仍然是 200，要靠回應內容裡的 <code>stat
 </section>
 
 <section>
-<h2>22. 待辦</h2>
+<h2>22. 持股改依代號排序（v1.16.1）</h2>
+<p>
+原本是依市值由大到小排。市值會隨股價每天變動，列表順序也就跟著變 ——
+要找某一檔得重新掃一遍。改成<strong>依代號排序</strong>，位置固定，
+也跟券商庫存畫面的習慣一致。
+</p>
+<p>
+代號用<strong>字串比較</strong>而不是拆成數字：台股有 00407A、00679B 這種帶字尾的代號，
+拆成「數字部分＋字尾」再比需要一套額外規則，規則一多就會有人搞不懂為什麼是這個順序。
+照字串排，看到什麼就是什麼。
+</p>
+<p class="muted">
+<code>byMarketValue()</code> 保留著，之後畫圓餅圖時仍然需要「由大到小」。
+</p>
+<table>
+<tr><th>情境</th><th>結果</th></tr>
+<tr><td>六檔持股</td><td><span class="pill ok">00407A、0050、00679B、2317、2382、3008</span></td></tr>
+<tr><td>其中兩檔有股價</td><td><span class="pill ok">順序不變，市值不再影響排列</span></td></tr>
+<tr><td>已全部賣出的部位</td><td><span class="pill ok">不列入（與原本一致）</span></td></tr>
+<tr><td>自動測試</td><td><span class="pill ok">282 項全數通過</span></td></tr>
+</table>
+</section>
+
+<section>
+<h2>23. 待辦</h2>
 <ul>
   <li>基金模組<strong>後續階段</strong>：定期定額的交易明細摺疊、對帳單 CSV 匯入、
       自動抓淨值與匯率（沿用第 21 節的同意機制，同樣預設關閉）</li>

@@ -10,7 +10,7 @@ import assert from 'node:assert/strict';
 
 import {
   ACTION, computePositions, averageCost, valuePosition,
-  summarizePortfolio, byMarketValue, validateTrade,
+  summarizePortfolio, byMarketValue, bySymbol, validateTrade,
   estimateFee, estimateTax, MIN_FEE,
 } from '../js/lib/portfolio.js';
 
@@ -235,6 +235,28 @@ test('byMarketValue 依市值排序，沒有報價的排最後', () => {
   const rows = summarizePortfolio(positions, { 2330: 80_000, 1301: 12_000 }).rows;
   const order = byMarketValue(rows).map((r) => r.symbol);
   assert.deepEqual(order, ['2330', '1301', '2317']);
+});
+
+test('bySymbol 依代號排序，與有沒有報價無關', () => {
+  const positions = computePositions([
+    tr({ symbol: '3008', shares: 100, price: 60_000 }),
+    tr({ symbol: '2317', shares: 100, price: 20_000 }),
+    tr({ symbol: '0050', shares: 100, price: 10_000 }),
+    tr({ symbol: '00679B', shares: 100, price: 2_500 }),
+  ]);
+  // 只有 3008 有報價：排序不該因此改變
+  const rows = summarizePortfolio(positions, { 3008: 80_000 }).rows;
+  assert.deepEqual(bySymbol(rows).map((r) => r.symbol), ['0050', '00679B', '2317', '3008']);
+});
+
+test('bySymbol 不列出已經清空的部位', () => {
+  const positions = computePositions([
+    tr({ symbol: '2330', shares: 100, price: 60_000 }),
+    tr({ symbol: '2317', shares: 100, price: 20_000 }),
+    tr({ symbol: '2317', date: '2026-06-01', action: ACTION.SELL, shares: 100, price: 30_000 }),
+  ]);
+  const rows = summarizePortfolio(positions, {}).rows;
+  assert.deepEqual(bySymbol(rows).map((r) => r.symbol), ['2330']);
 });
 
 // ── 驗證 ────────────────────────────────────────────────────

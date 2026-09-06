@@ -292,7 +292,20 @@ export function summarizePortfolio(positions = [], quotes = {}) {
   };
 }
 
-/** 依市值排序，供圓餅圖與列表使用；沒有報價的排最後 */
+/**
+ * 依代號排序，供持股列表使用。
+ *
+ * 代號是字串比較而不是數值：台股代號有 00407A、00679B 這種帶字尾的，
+ * 拆成數字再比會需要一套額外規則，而規則一多就會有人搞不懂為什麼是這個順序。
+ * 直接照字串排，看到什麼就是什麼。
+ */
+export function bySymbol(rows) {
+  return [...rows]
+    .filter((r) => r.shares > 0)
+    .sort((a, b) => a.symbol.localeCompare(b.symbol));
+}
+
+/** 依市值排序，供圓餅圖使用；沒有報價的排最後 */
 export function byMarketValue(rows) {
   return [...rows]
     .filter((r) => r.shares > 0)

@@ -11,7 +11,7 @@
 import { el, clear, toast, openSheet, confirmDialog, haptic } from '../ui.js';
 import { formatAmount, formatCurrency, parseAmount } from '../lib/money.js';
 import { todayISO, formatDayLabel } from '../lib/dateutil.js';
-import { ACTION, estimateFee, estimateTax, byMarketValue } from '../lib/portfolio.js';
+import { ACTION, estimateFee, estimateTax, bySymbol } from '../lib/portfolio.js';
 import { describeQuoteErrors } from '../lib/quotesource.js';
 import * as store from '../store.js';
 
@@ -354,7 +354,7 @@ export function createStocksSection({ onChange } = {}) {
 
   function renderList(s) {
     clear(refs.list);
-    const held = byMarketValue(s.rows);
+    const held = bySymbol(s.rows);
     if (!held.length) return;
 
     for (const r of held) {
