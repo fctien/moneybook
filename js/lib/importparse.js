@@ -265,9 +265,12 @@ export function extractHoldings(text, opts = {}) {
   // 不必從數值特徵猜 —— 猜錯了畫面上完全看不出來。
   for (const line of lines) {
     const toks = line.filter((t) => String(t).trim() !== '');
-    if (toks.length < 3) continue;
-    const known = toks.filter((t) => HEADER_FIELD.has(String(t).trim())).length;
-    if (known >= 3 && known >= Math.floor(toks.length / 3)) { header = toks; break; }
+    if (toks.length < 2) continue;
+    // 表頭不會有數字。這一條比「至少要有幾個已知欄名」可靠得多 ——
+    // 分次擷取窄欄位時，表頭可能只有「商品 成本金額」兩欄，
+    // 用數量門檻會整個認不出來，那一欄就會被誤判成股數。
+    if (toks.some((t) => toNumber(t) !== null)) continue;
+    if (toks.some((t) => HEADER_FIELD.has(String(t).trim()))) { header = toks; break; }
   }
 
   for (let i = 0; i < lines.length; i += 1) {
@@ -346,7 +349,52 @@ export function extractHoldings(text, opts = {}) {
     });
   }
 
-  return { rows, skipped, unresolved, header };
+  // 偵測「表格被拆成直行」：iOS 即時文字對寬表格常常逐直行讀取，
+  // 名稱擠成一個區塊、數字在另外幾個區塊，行與行的對應在辨識時就沒了。
+  // 這種情況要明講，不能靠順序去猜對應 —— 猜錯一格，之後每一檔的成本
+  // 都會掛到別人身上，而且看起來完全正常。
+  const withNumbers = rows.filter((r) => r.numbers.length > 0).length;
+  const layoutLost = rows.length >= 3 && withNumbers <= rows.length / 3;
+
+  return { rows, skipped, unresolved, header, layoutLost };
+}
+
+/**
+ * 依股票代號把多批資料合併成一筆，欄位互補。
+ *
+ * 這是「分次擷取窄欄位」的關鍵：先貼「商品＋庫存數量」，再貼「商品＋成本金額」，
+ * 兩批用代號對起來就湊成完整的一筆。寬表格辨識不出行對應時，這是唯一可靠的做法。
+ *
+ * 兩批對同一個欄位給了不同的值時不會擅自挑一個，而是回報衝突讓使用者決定。
+ *
+ * @param {object[]} rows 已攤平成 shares/avgCost/totalCost/price 的列
+ * @returns {{rows: object[], conflicts: {symbol:string, field:string, values:number[]}[]}}
+ */
+export function mergeBySymbol(rows = []) {
+  const FIELDS = ['shares', 'avgCost', 'totalCost', 'price'];
+  const map = new Map();
+  const conflicts = [];
+
+  for (const row of rows) {
+    if (!map.has(row.symbol)) {
+      map.set(row.symbol, { ...row, mergedFrom: 1 });
+      continue;
+    }
+
+    const cur = map.get(row.symbol);
+    cur.mergedFrom += 1;
+    if (!cur.name && row.name) cur.name = row.name;
+
+    for (const f of FIELDS) {
+      const a = cur[f];
+      const b = row[f];
+      if (b == null) continue;
+      if (a == null) { cur[f] = b; continue; }
+      if (a !== b) conflicts.push({ symbol: row.symbol, field: f, values: [a, b] });
+    }
+  }
+
+  return { rows: [...map.values()], conflicts };
 }
 
 /**
@@ -385,8 +433,11 @@ function mapByHeader(rows, header) {
     return HEADER_FIELD.get(name) ?? FIELD.IGNORE;
   });
 
-  // 至少要認出股數才算數，否則這份對應沒有意義
-  if (!mapping.includes(FIELD.SHARES)) return null;
+  // 只要認出任何一個有意義的欄位就採用。
+  // 不能硬性要求「必須有股數」—— 分次擷取窄欄位時，某一批可能只帶成本，
+  // 擋掉的話那一欄會退回數值判斷、被誤認成股數，兩批合併時就變成衝突。
+  const meaningful = [FIELD.SHARES, FIELD.AVG_COST, FIELD.TOTAL_COST, FIELD.PRICE];
+  if (!mapping.some((m) => meaningful.includes(m))) return null;
 
   // 兩種成本欄位同時存在時，留「成本總額」而不是「平均單價」。
   // 平均單價是券商四捨五入後的顯示值：8.7423 × 107,000 = 935,326，

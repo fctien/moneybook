@@ -13,7 +13,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { extractHoldings, suggestMapping, rowsToTrades, FIELD } from '../js/lib/importparse.js';
+import {
+  extractHoldings, suggestMapping, rowsToTrades, mergeBySymbol, FIELD,
+} from '../js/lib/importparse.js';
 import { nameToSymbol } from '../js/lib/stocklookup.js';
 import { computePositions, summarizePortfolio } from '../js/lib/portfolio.js';
 
@@ -277,4 +279,137 @@ test('成本未知的部位不會污染整體損益總額', () => {
   assert.equal(s.unrealized, 20_000_000, '只計入成本已知的那一檔');
   assert.equal(s.complete, false, '有部位算不出來就不是完整數字');
   assert.deepEqual(s.missingCost, ['0050']);
+});
+
+// ── 表格被辨識成直行（iOS 即時文字對寬表格的實際行為）──────────
+
+// 使用者實際貼上的內容：名稱擠成一個區塊、數字在另外幾個區塊，
+// 每一列的對應關係在辨識階段就已經消失。
+const COLUMN_SHUFFLED = `商品
+交易別
+庫存數量 現價
+市值
+主動凱基台灣
+現股
+元大台灣50
+現股
+富邦科技
+元大高股息
+元大美債20年
+成本數量 成本金額
+107,000
+9.73
+1,041,110
+107,000
+4,000
+935,431
+203,462
+平均單價
+8.7423
+50.8655`;
+
+test('表格被拆成直行時要能偵測出來，而不是硬猜', () => {
+  const r = extractHoldings(COLUMN_SHUFFLED, opts);
+  assert.ok(r.rows.length >= 3, '股票名稱仍然認得出來');
+  assert.equal(r.layoutLost, true, '要標記出「行對應已消失」');
+  assert.ok(r.rows.every((x) => x.numbers.length === 0), '沒有任何數字對得上');
+});
+
+test('正常的逐列排版不會被誤判為直行', () => {
+  const r = extractHoldings(FULL_B, opts);
+  assert.equal(r.layoutLost, false);
+});
+
+// ── 分次擷取窄欄位，用代號互補 ──────────────────────────────
+
+test('兩批各給一部分欄位，用代號合併成完整的一筆', () => {
+  // 寬表格辨識不出行對應時唯一可靠的做法：
+  // 先貼「商品＋庫存數量」，再貼「商品＋成本金額」
+  const rows = [
+    { symbol: '2330', name: '台積電', shares: 1000, avgCost: null, totalCost: null, price: null },
+    { symbol: '2330', name: '', shares: null, avgCost: null, totalCost: 848725, price: null },
+  ];
+  const { rows: merged, conflicts } = mergeBySymbol(rows);
+
+  assert.equal(merged.length, 1);
+  assert.equal(merged[0].shares, 1000);
+  assert.equal(merged[0].totalCost, 848725);
+  assert.equal(merged[0].name, '台積電', '名稱從有值的那一批補上');
+  assert.deepEqual(conflicts, []);
+});
+
+test('兩批給了不同的值時回報衝突，不擅自挑一個', () => {
+  // 挑錯了畫面上看不出來，之後的損益全部跟著錯
+  const rows = [
+    { symbol: '2330', name: '台積電', shares: 1000, avgCost: null, totalCost: null, price: null },
+    { symbol: '2330', name: '台積電', shares: 2000, avgCost: null, totalCost: null, price: null },
+  ];
+  const { rows: merged, conflicts } = mergeBySymbol(rows);
+
+  assert.equal(merged.length, 1);
+  assert.equal(conflicts.length, 1);
+  assert.equal(conflicts[0].symbol, '2330');
+  assert.equal(conflicts[0].field, 'shares');
+  assert.deepEqual(conflicts[0].values, [1000, 2000]);
+});
+
+test('不同代號不會被合併', () => {
+  const rows = [
+    { symbol: '2330', name: '', shares: 1000, avgCost: null, totalCost: null, price: null },
+    { symbol: '2317', name: '', shares: 2000, avgCost: null, totalCost: null, price: null },
+  ];
+  assert.equal(mergeBySymbol(rows).rows.length, 2);
+});
+
+test('mergeBySymbol 對空輸入安全', () => {
+  assert.deepEqual(mergeBySymbol().rows, []);
+  assert.deepEqual(mergeBySymbol([]).conflicts, []);
+});
+
+test('分三次擷取窄欄位，合併後成本與券商完全一致', () => {
+  // 這是寬表格被辨識成直行時唯一可靠的流程：
+  // 橫向捲動，一次只讓兩三欄入鏡，分次貼上，用代號合併
+  const batches = [
+    '商品 庫存數量\n主動凱基台灣 107,000\n大立光 11',
+    '商品 成本金額\n主動凱基台灣 935,431\n大立光 37,806',
+    '商品 現價\n主動凱基台灣 9.73\n大立光 7,400',
+  ];
+
+  const all = [];
+  const mappings = [];
+  for (const text of batches) {
+    const r = extractHoldings(text, opts);
+    const m = suggestMapping(r.rows, r.header);
+    mappings.push(m);
+    for (const row of r.rows) {
+      const pick = (f) => {
+        const k = m.indexOf(f);
+        return k >= 0 ? row.numbers[k] ?? null : null;
+      };
+      all.push({
+        ...row,
+        shares: pick(FIELD.SHARES),
+        avgCost: pick(FIELD.AVG_COST),
+        totalCost: pick(FIELD.TOTAL_COST),
+        price: pick(FIELD.PRICE),
+      });
+    }
+  }
+
+  // 只有兩欄的表頭也要認得。認不出來的話那一欄會退回數值判斷、
+  // 被誤認成股數，兩批合併時就變成衝突而不是互補。
+  assert.deepEqual(mappings, [[FIELD.SHARES], [FIELD.TOTAL_COST], [FIELD.PRICE]]);
+
+  const { rows, conflicts } = mergeBySymbol(all);
+  assert.deepEqual(conflicts, [], '各批帶不同欄位，不該有衝突');
+
+  const positions = computePositions(
+    rowsToTrades(rows, [], '2026-09-06').trades.map((t, i) => ({ ...t, tax: 0, amount: 0, createdAt: i })),
+  );
+  const by = Object.fromEntries(positions.map((p) => [p.symbol, p]));
+
+  assert.equal(by['00407A'].shares, 107_000);
+  assert.equal(by['00407A'].totalCost, 93_543_100, '成本 935,431 元');
+  assert.equal(by['3008'].shares, 11);
+  assert.equal(by['3008'].totalCost, 3_780_600, '成本 37,806 元');
 });

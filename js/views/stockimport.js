@@ -13,7 +13,7 @@ import { el, clear, toast, openSheet, confirmDialog, haptic } from '../ui.js';
 import { todayISO } from '../lib/dateutil.js';
 import {
   FIELD, decodeText, extractHoldings, suggestMapping,
-  mergeBatches, combineDuplicates, rowsToTrades,
+  mergeBatches, combineDuplicates, mergeBySymbol, rowsToTrades,
 } from '../lib/importparse.js';
 import { nameToSymbol } from '../lib/stocklookup.js';
 import * as store from '../store.js';
@@ -44,6 +44,8 @@ export function openStockImport({ onDone } = {}) {
     rows: [],
     duplicates: [],
     combined: false,
+    conflicts: [],
+    layoutLost: false,
     // 讀到了但查不出是哪一檔的名稱，要讓使用者知道有東西被漏掉
     unresolved: [],
   };
@@ -52,12 +54,15 @@ export function openStockImport({ onDone } = {}) {
     const render = () => {
       clear(body);
       body.append(buildSource());
+      const lost = buildLayoutLost();
+      if (lost) body.append(lost);
+
       if (stateIn.rows.length) {
         body.append(buildMapping(), buildPreview(), buildActions());
       } else {
         const unresolved = buildUnresolved();
         if (unresolved) body.append(unresolved);
-        body.append(buildHelp());
+        if (!lost) body.append(buildHelp());
       }
     };
 
@@ -71,8 +76,15 @@ export function openStockImport({ onDone } = {}) {
 
       const addText = (text) => {
         // 券商庫存畫面常常只有名稱沒有代號，交給查表補上
-        const { rows, skipped, unresolved, header } = extractHoldings(text, { lookup: nameToSymbol });
+        const { rows, skipped, unresolved, header, layoutLost } = extractHoldings(text, { lookup: nameToSymbol });
         if (unresolved.length) stateIn.unresolved.push(...unresolved);
+
+        // 認得出股票卻幾乎沒有數字 —— 表格在辨識時就被拆成直行了
+        if (layoutLost) {
+          stateIn.layoutLost = true;
+          render();
+          return;
+        }
 
         if (!rows.length) {
           toast(
@@ -193,6 +205,39 @@ export function openStockImport({ onDone } = {}) {
 
     // ------------------------------------------------------------ 預覽
 
+    /**
+     * 表格被辨識成直行時的說明。
+     *
+     * 這種情況「不能」靠順序去猜對應：名稱一個區塊、數字另一個區塊，
+     * 順序錯一格，之後每一檔的成本都會掛到別人身上，而且看起來完全正常。
+     * 與其猜，不如告訴使用者怎麼取得能用的文字。
+     */
+    function buildLayoutLost() {
+      if (!stateIn.layoutLost) return null;
+
+      return el('div.hint.hint--warn', {}, [
+        el('div', {
+          text: '認得出是哪些股票，但一個數字都對不上 ——'
+            + '這張表格太寬，iOS 的文字辨識是「逐直行」讀的，'
+            + '每一列的對應關係在辨識時就已經消失了。',
+        }),
+        el('div.help-block__title', { text: '改用這個方式' }),
+        el('ol.guide-list', {}, [
+          el('li', { text: '把畫面「橫向捲動」，一次只讓兩三欄入鏡再截圖。例如先截「商品＋庫存數量」。' }),
+          el('li', { text: '貼進來按「解析並加入」。' }),
+          el('li', { text: '再截「商品＋成本金額」，同樣貼進來。' }),
+          el('li', { text: '兩批會用股票代號自動對起來，湊成完整的一筆。' }),
+        ]),
+        el('p.hint', {
+          text: '欄位少的畫面辨識時才留得住行對應。若券商有網頁版，直接選取表格複製會更準。',
+        }),
+        el('button.link-btn', {
+          type: 'button',
+          onClick: () => { stateIn.layoutLost = false; render(); },
+        }, ['知道了']),
+      ]);
+    }
+
     function buildUnresolved() {
       if (!stateIn.unresolved.length) return null;
       const names = [...new Set(stateIn.unresolved)];
@@ -217,6 +262,18 @@ export function openStockImport({ onDone } = {}) {
 
       const unresolved = buildUnresolved();
       if (unresolved) wrap.append(unresolved);
+
+      if (stateIn.conflicts.length) {
+        // 兩批對同一個欄位給了不同的值。不擅自挑一個 ——
+        // 挑錯了畫面上看不出來，之後的損益全部跟著錯。
+        const lines = stateIn.conflicts.slice(0, 5).map((c) => {
+          const label = { shares: '股數', avgCost: '每股成本', totalCost: '成本總額', price: '現價' }[c.field] ?? c.field;
+          return `${c.symbol} 的${label}：${c.values.join(' 與 ')}`;
+        });
+        wrap.append(el('div.hint.hint--warn', {
+          text: `不同批次給了不一樣的數字，請在下面確認哪個才對：${lines.join('；')}`,
+        }));
+      }
 
       if (stateIn.duplicates.length) {
         wrap.append(el('div.hint.hint--warn', {}, [
@@ -322,6 +379,8 @@ export function openStockImport({ onDone } = {}) {
             stateIn.duplicates = [];
             stateIn.combined = false;
             stateIn.unresolved = [];
+            stateIn.conflicts = [];
+            stateIn.layoutLost = false;
             render();
           },
         }, ['清空重來']),
@@ -381,7 +440,12 @@ export function openStockImport({ onDone } = {}) {
       stateIn.combined = false;
       const merged = mergeBatches(stateIn.batches.map((b) => b.rows));
       stateIn.duplicates = merged.duplicates;
-      stateIn.rows = dedupeKeepFirst(resolvedRowsOfAllBatches());
+
+      // 用代號把各批互補起來：先貼「商品＋庫存數量」、再貼「商品＋成本金額」，
+      // 兩批就湊成完整的一筆。這是寬表格唯一可靠的取得方式。
+      const bySymbol = mergeBySymbol(resolvedRowsOfAllBatches());
+      stateIn.rows = bySymbol.rows;
+      stateIn.conflicts = bySymbol.conflicts;
     }
 
     /**
@@ -403,18 +467,6 @@ export function openStockImport({ onDone } = {}) {
           row.price = pick(FIELD.PRICE);
           out.push(row);
         }
-      }
-      return out;
-    }
-
-    /** 同一代號只留第一次出現的那筆（重複的另外提示，不自動相加） */
-    function dedupeKeepFirst(rows) {
-      const seen = new Set();
-      const out = [];
-      for (const r of rows) {
-        if (seen.has(r.symbol)) continue;
-        seen.add(r.symbol);
-        out.push(r);
       }
       return out;
     }
