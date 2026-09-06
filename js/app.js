@@ -10,7 +10,7 @@ import { createAssetsView } from './views/assets.js';
 import { createReportView } from './views/report.js';
 import { createSettingsView } from './views/settings.js';
 
-export const APP_VERSION = '1.15.0';
+export const APP_VERSION = '1.16.0';
 
 const TABS = [
   { id: 'entry', label: '記帳', icon: '✏️' },
@@ -65,6 +65,45 @@ async function main() {
 
   registerServiceWorker();
   maybeShowFirstRunGuide();
+  startAutoQuoteUpdates();
+}
+
+/**
+ * 收盤後的自動更新。
+ *
+ * PWA 關著的時候不會執行任何程式 —— iOS Safari 沒有背景定期同步，
+ * Android 的 Periodic Background Sync 也不保證排得到。
+ * 所以這裡做的是「開啟或回到前景時補抓一次」，條件與次數的判斷都在 store 裡，
+ * 沒同意、還沒收盤、今天抓過了，都會安靜地什麼都不做。
+ */
+function startAutoQuoteUpdates() {
+  const run = async () => {
+    try {
+      const r = await store.maybeAutoUpdateQuotes();
+      if (!r.ran || !r.updated) return;
+
+      // 自動跑的結果用一句話帶過就好，不打斷使用者正在做的事。
+      // 但有檔數沒更新到就得講 —— 總資產少了一塊卻不說最糟。
+      const parts = [`已自動更新 ${r.updated} 檔股價`];
+      if (r.snapshot) parts.push('並存下今日快照');
+      toast(parts.join('，'), 'success', 3600);
+      if (r.errors.length) {
+        const { describeQuoteErrors } = await import('./lib/quotesource.js');
+        toast(describeQuoteErrors(r.errors), 'error', 6000);
+      }
+    } catch (err) {
+      // 自動更新失敗不該打擾使用者：他沒有按下任何東西。
+      // 畫面上的「上次更新」日期自然會顯示資料變舊了。
+      console.warn('自動更新股價失敗', err);
+    }
+  };
+
+  run();
+
+  // 手機把 App 放在背景一整天再切回來，也算是「今天第一次開啟」
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') run();
+  });
 }
 
 function buildTabBar() {

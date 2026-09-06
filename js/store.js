@@ -11,11 +11,12 @@ import { netWorth } from './lib/stats.js';
 import {
   validateAccount, validateCategory, validateSnapshot, validateTransaction, newId,
 } from './lib/schema.js';
-import { todayISO } from './lib/dateutil.js';
+import { todayISO, taipeiDateISO, isAfterMarketClose } from './lib/dateutil.js';
 import { computePositions, summarizePortfolio, validateTrade } from './lib/portfolio.js';
 import {
   computeFundPositions, summarizeFunds, validateFundTrade, usedCurrencies,
 } from './lib/funds.js';
+import { fetchQuotes } from './lib/quotesource.js';
 
 export const state = {
   accounts: [],
@@ -363,6 +364,127 @@ export function syncStockValueToAccount() {
 
 export function syncFundValueToAccount() {
   return syncModuleValueToAccount('fund');
+}
+
+/**
+ * 一次寫入多筆報價。
+ *
+ * 不是把 setQuote 呼叫 N 次：那會觸發 N 次帳戶同步與 N 次畫面重繪，
+ * 30 檔就是 30 次全畫面重算，而且中途的每一次都是「更新到一半」的數字。
+ */
+export async function setQuotes(rows, { source = 'manual' } = {}) {
+  for (const r of rows ?? []) {
+    const row = {
+      symbol: String(r.symbol).trim().toUpperCase(),
+      close: Math.round(r.close),
+      date: r.date ?? todayISO(),
+      source: r.source ?? source,
+      updatedAt: Date.now(),
+    };
+    await db.put(db.STORE.quotes, row);
+    state.quotes[row.symbol] = row;
+  }
+  await syncStockValueToAccount();
+  notify();
+  return rows?.length ?? 0;
+}
+
+// ------------------------------------------------- 股價自動更新
+
+/** 使用者是否同意連線抓股價。預設 false —— 這是整個 App 唯一的對外連線。 */
+export const AUTO_QUOTE_KEY = 'autoQuoteEnabled';
+/** 上次自動更新的台北日期，用來確保一天只跑一次 */
+export const AUTO_QUOTE_RUN_KEY = 'autoQuoteLastRun';
+
+export function autoQuoteEnabled() {
+  return getSetting(AUTO_QUOTE_KEY, false) === true;
+}
+
+export async function setAutoQuoteEnabled(on) {
+  await setSetting(AUTO_QUOTE_KEY, on === true);
+  // 關掉再打開時應該要能立刻重抓，所以把「今天跑過了」的紀錄一併清掉
+  if (!on) await setSetting(AUTO_QUOTE_RUN_KEY, '');
+  notify();
+}
+
+/**
+ * 抓取全部持股的收盤價並寫回。
+ *
+ * 只抓「還有持股」的代號 —— 已經賣光的沒有市值可言，
+ * 多送幾個代號出去只是多洩漏一點資訊。
+ *
+ * 抓完若每一檔都有價格，順手存一張淨資產快照（也就是「計總」）。
+ * 有任何一檔缺價就不存：那張快照會是一個偏低的數字，
+ * 之後在趨勢圖上會看起來像資產真的掉了一塊，而且事後無從分辨。
+ *
+ * @returns {Promise<object>} 結果摘要，交給畫面決定怎麼說
+ */
+export async function updateAllQuotes({ onProgress, auto = false } = {}) {
+  const symbols = stockPositions().filter((p) => p.shares > 0).map((p) => p.symbol);
+  if (!symbols.length) {
+    return { ok: true, updated: 0, total: 0, errors: [], stopped: false, snapshot: null };
+  }
+
+  const { quotes, errors, stopped } = await fetchQuotes(symbols, { onProgress });
+  if (quotes.length) await setQuotes(quotes, { source: 'finmind' });
+
+  // 不論成敗都記下「今天跑過了」，否則一直連不上時每次開 App 都會再試一輪
+  if (auto) await setSetting(AUTO_QUOTE_RUN_KEY, taipeiDateISO());
+
+  const summary = portfolioSummary();
+  let snapshot = null;
+  if (summary.pricedCount === summary.heldCount && summary.heldCount > 0) {
+    const date = taipeiDateISO();
+    // 同一天已有快照時沿用原本的備註 —— 使用者自己寫的字不該被系統訊息蓋掉
+    const existing = state.snapshots.find((x) => x.date === date);
+    const r = await takeSnapshot(existing?.note || '收盤後自動計總', date);
+    if (r?.ok) snapshot = r;
+  }
+
+  return {
+    ok: quotes.length > 0 || errors.length === 0,
+    updated: quotes.length,
+    total: symbols.length,
+    quoteDate: quotes.length ? quotes.map((q) => q.date).sort().at(-1) : null,
+    errors,
+    stopped,
+    snapshot,
+    // 缺價的檔數，用來說明為什麼沒有存快照
+    missing: summary.heldCount - summary.pricedCount,
+  };
+}
+
+/**
+ * 開啟 App 時的自動更新。
+ *
+ * PWA 在關閉時無法執行程式 —— iOS Safari 沒有背景定期同步，
+ * Android 的 Periodic Background Sync 也不保證會被排到。
+ * 因此「每日自動」的實際意思是：收盤後你開啟 App 時，自動抓一次。
+ *
+ * 三個條件都成立才會跑，任何一個不成立就安靜地什麼都不做：
+ *   1. 使用者已同意
+ *   2. 台北時間已過 14:00（13:30 收盤，資料要一點時間整理）
+ *   3. 今天還沒跑過
+ */
+export async function maybeAutoUpdateQuotes(opts = {}) {
+  if (!autoQuoteEnabled()) return { ran: false, reason: 'disabled' };
+  if (!isAfterMarketClose()) return { ran: false, reason: 'beforeClose' };
+  if (getSetting(AUTO_QUOTE_RUN_KEY, '') === taipeiDateISO()) {
+    return { ran: false, reason: 'alreadyRan' };
+  }
+  if (!stockPositions().some((p) => p.shares > 0)) return { ran: false, reason: 'noHoldings' };
+
+  const result = await updateAllQuotes({ ...opts, auto: true });
+  return { ran: true, ...result };
+}
+
+/** 上次成功抓價的時間，供畫面標示資料有多舊 */
+export function lastQuoteUpdate() {
+  let latest = null;
+  for (const q of Object.values(state.quotes)) {
+    if (!latest || (q.updatedAt ?? 0) > (latest.updatedAt ?? 0)) latest = q;
+  }
+  return latest;
 }
 
 /** 移除某一檔的報價（改代號時把舊的清掉，免得留下對不到任何持股的孤兒） */

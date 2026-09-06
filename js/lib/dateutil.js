@@ -120,3 +120,41 @@ export function isWithin(iso, start, end) {
   if (end && iso > end) return false;
   return true;
 }
+
+// ── 台北時區 ──────────────────────────────────────────────
+// 收盤時間是台北的事實，不是裝置的事實。
+// 使用者出國時裝置時區會變，但台股仍然是 13:30 收盤 ——
+// 用本地時區判斷「收盤了沒」會在時差夠大時整天都判斷錯。
+
+const TAIPEI_PARTS = new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'Asia/Taipei',
+  year: 'numeric', month: '2-digit', day: '2-digit',
+  hour: '2-digit', minute: '2-digit', hour12: false,
+});
+
+/** 台北現在的日期與時刻 */
+export function taipeiNow(now = new Date()) {
+  const parts = {};
+  for (const p of TAIPEI_PARTS.formatToParts(now)) parts[p.type] = p.value;
+  return {
+    date: `${parts.year}-${parts.month}-${parts.day}`,
+    // hour24 會把午夜格成 '24'，換回 0 才符合一般認知
+    hour: Number(parts.hour) % 24,
+    minute: Number(parts.minute),
+  };
+}
+
+/** 台北的今天，'YYYY-MM-DD' */
+export function taipeiDateISO(now = new Date()) {
+  return taipeiNow(now).date;
+}
+
+/**
+ * 台股收盤時間 13:30。資料來源整理完通常要再等一會，
+ * 因此以 14:00 之後才視為「今天的收盤價應該拿得到了」。
+ */
+export const MARKET_CLOSE_HOUR = 14;
+
+export function isAfterMarketClose(now = new Date()) {
+  return taipeiNow(now).hour >= MARKET_CLOSE_HOUR;
+}

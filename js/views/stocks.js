@@ -12,6 +12,7 @@ import { el, clear, toast, openSheet, confirmDialog, haptic } from '../ui.js';
 import { formatAmount, formatCurrency, parseAmount } from '../lib/money.js';
 import { todayISO, formatDayLabel } from '../lib/dateutil.js';
 import { ACTION, estimateFee, estimateTax, byMarketValue } from '../lib/portfolio.js';
+import { describeQuoteErrors } from '../lib/quotesource.js';
 import * as store from '../store.js';
 
 /**
@@ -118,6 +119,7 @@ export function createStocksSection({ onChange } = {}) {
     clear(node);
     refs.summary = el('div.stock-summary');
     refs.list = el('div.stock-list');
+    refs.updateBar = el('div.quote-bar');
 
     node.append(
       el('div.section-head', {}, [
@@ -133,6 +135,7 @@ export function createStocksSection({ onChange } = {}) {
           el('button.link-btn', { type: 'button', onClick: () => openHoldingEditor() }, ['+ 新增持股']),
         ]),
       ]),
+      refs.updateBar,
       refs.summary,
       refs.list,
     );
@@ -142,9 +145,76 @@ export function createStocksSection({ onChange } = {}) {
 
   function refresh() {
     const s = store.portfolioSummary();
+    renderUpdateBar(s);
     renderSummary(s);
     renderList(s);
     onChange?.();
+  }
+
+  /**
+   * 自動更新的入口與狀態。
+   *
+   * 沒同意連線時不顯示按鈕，只留一句話指向設定頁 ——
+   * 把「立即更新」直接擺出來會讓人在不知情的狀況下把持股代號送出去。
+   */
+  function renderUpdateBar(s) {
+    clear(refs.updateBar);
+    if (!s.heldCount) return;
+
+    if (!store.autoQuoteEnabled()) {
+      refs.updateBar.append(el('p.hint', {
+        text: '股價目前是手動填寫。可到「設定 → 股價自動更新」開啟收盤後自動抓價。',
+      }));
+      return;
+    }
+
+    const last = store.lastQuoteUpdate();
+    const btn = el('button.link-btn', {
+      type: 'button',
+      onClick: () => runUpdate(btn),
+    }, ['立即更新股價']);
+
+    refs.updateBar.append(el('p.hint', {}, [
+      el('span', {
+        text: last ? `股價為 ${formatDayLabel(last.date)} 收盤價。` : '尚未抓過股價。',
+      }),
+      btn,
+    ]));
+  }
+
+  async function runUpdate(btn) {
+    btn.disabled = true;
+    const original = btn.textContent;
+    btn.textContent = '更新中…';
+
+    try {
+      const r = await store.updateAllQuotes({
+        onProgress: (done, total) => { btn.textContent = `更新中 ${done}/${total}`; },
+      });
+
+      if (r.total === 0) return toast('沒有持股需要更新', 'info');
+
+      if (r.updated) {
+        const parts = [`已更新 ${r.updated}/${r.total} 檔`];
+        if (r.quoteDate) parts.push(`（${formatDayLabel(r.quoteDate)} 收盤）`);
+        if (r.snapshot) parts.push('，並存下今日快照');
+        toast(parts.join(''), 'success', 3600);
+      }
+
+      // 失敗的要講出是哪幾檔、為什麼。少更新幾檔卻只說「完成」，
+      // 使用者會拿一個不完整的市值當成完整的。
+      if (r.errors.length) {
+        toast(describeQuoteErrors(r.errors), 'error', 6000);
+      } else if (!r.snapshot && r.missing > 0) {
+        toast(`還有 ${r.missing} 檔沒有股價，因此沒有存快照`, 'info', 4000);
+      }
+    } catch (err) {
+      toast(`更新失敗：${err?.message ?? err}`, 'error', 5000);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = original;
+      refresh();
+    }
   }
 
   // ---------------------------------------------------------------- 總覽

@@ -30,6 +30,7 @@ export function createSettingsView({ appVersion = '1.0.0' } = {}) {
     clear(node);
 
     refs.backupCard = el('section.card.card--accent');
+    refs.quoteCard = el('section.card');
     refs.dataCard = el('section.card');
     refs.storageCard = el('section.card');
 
@@ -42,6 +43,7 @@ export function createSettingsView({ appVersion = '1.0.0' } = {}) {
           rowButton('💰', '收入分類', () => openCategoryManager('income')),
         ]),
       ]),
+      refs.quoteCard,
       refs.dataCard,
       refs.storageCard,
       buildInstallCard(),
@@ -125,6 +127,59 @@ export function createSettingsView({ appVersion = '1.0.0' } = {}) {
       meta ? el('span.row__meta', { text: meta }) : null,
       el('span.row__chevron', { text: '›' }),
     ]);
+  }
+
+  // ------------------------------------------------------------- 股價自動更新
+
+  /**
+   * 這是整個 App 唯一會對外連線的功能，所以：
+   *   - 預設關閉
+   *   - 開關旁邊直接寫清楚會送出什麼、送到哪裡，不藏在說明頁裡
+   * 使用者要能在按下去之前就知道自己同意了什麼。
+   */
+  function renderQuoteCard() {
+    clear(refs.quoteCard);
+
+    const enabled = store.autoQuoteEnabled();
+    const toggle = el('input', {
+      type: 'checkbox',
+      checked: enabled,
+      onChange: async (e) => {
+        await store.setAutoQuoteEnabled(e.target.checked);
+        toast(e.target.checked ? '已開啟自動更新股價' : '已關閉，股價改為手動填寫', 'success', 3200);
+        renderQuoteCard();
+      },
+    });
+
+    const last = store.lastQuoteUpdate();
+
+    refs.quoteCard.append(
+      el('h2.card__title', { text: '股價自動更新' }),
+      el('label.switch-row', {}, [
+        el('span', { text: '收盤後自動更新股價並計總' }),
+        toggle,
+      ]),
+      el('p.hint', {
+        text: '開啟後，台北時間 14:00 之後第一次開啟本 App 時，'
+          + '會自動抓取持股的最新收盤價、更新總資產，並存下當日的淨資產快照。一天只會抓一次。',
+      }),
+      el('p.hint.hint--warn', {
+        text: '這是本 App 唯一會連外的功能。抓價時會把你的持股代號送到資料來源 FinMind '
+          + '（api.finmindtrade.com）。送出的只有代號，沒有股數、成本或任何個人資料，'
+          + '但對方仍然看得出「有人持有這幾檔」。不開啟的話，股價改為自己手動填，其他功能完全不受影響。',
+      }),
+      el('p.hint', {
+        text: '資料是收盤價，不是盤中即時價 —— 盤中不會跳動。'
+          + '手機關著的時候程式不會執行，所以是「開啟 App 時補抓」，不是背景排程。',
+      }),
+    );
+
+    if (last) {
+      refs.quoteCard.append(el('p.hint', {
+        text: `上次更新：${formatDayLabel(last.date)} 的收盤價`
+          + (last.source === 'finmind' ? '（自動抓取）' : '（手動填入）'),
+      }));
+    }
   }
 
   // ------------------------------------------------------------- 備份
@@ -509,6 +564,7 @@ export function createSettingsView({ appVersion = '1.0.0' } = {}) {
 
   function refresh() {
     renderBackupCard();
+    renderQuoteCard();
     renderDataCard();
     renderStorageCard();
   }

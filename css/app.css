@@ -1026,6 +1026,8 @@ button { cursor: pointer; }
 
 .stock-summary,
 .fund-summary { margin: 4px 0 10px; }
+.quote-bar:empty { display: none; }
+.quote-bar .hint { margin: 2px 0 8px; }
 
 .stock-list,
 .fund-list { display: flex; flex-direction: column; gap: 8px; }

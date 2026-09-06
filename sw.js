@@ -9,7 +9,7 @@
  * 清除快取只會讓 App 重新下載程式碼，不會動到任何一筆帳。
  */
 
-const CACHE_VERSION = 'moneybook-v1.15.0';
+const CACHE_VERSION = 'moneybook-v1.16.0';
 
 const APP_SHELL = [
   './',
@@ -34,6 +34,7 @@ const APP_SHELL = [
   './js/lib/invoice.js',
   './js/lib/portfolio.js',
   './js/lib/funds.js',
+  './js/lib/quotesource.js',
   './js/lib/qrscan.js',
   // jsQR 有 250 KB，是 app shell 裡最大的一支。仍然預先快取，
   // 否則第一次在離線狀態下按「掃發票」會直接失敗。
