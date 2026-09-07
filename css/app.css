@@ -203,6 +203,22 @@ button { cursor: pointer; }
 .segment--sm { margin-bottom: 10px; }
 .segment--sm .segment__item { font-size: 13px; min-height: 34px; }
 
+/* 資產頁的三段切換：名稱一行、筆數一行 */
+.segment--stacked { margin: 14px 0 12px; }
+.segment--stacked .segment__item {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 7px 4px;
+  min-height: 46px;
+}
+.segment__count {
+  font-size: 11px;
+  color: var(--c-text-muted);
+  font-variant-numeric: tabular-nums;
+  font-weight: 400;
+}
+
 .amount-box {
   text-align: right;
   padding: 8px 2px 2px;

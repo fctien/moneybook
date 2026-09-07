@@ -18,33 +18,44 @@ import * as store from '../store.js';
 import { createStocksSection } from './stocks.js';
 import { createFundsSection } from './funds.js';
 
+/** 資產頁裡的三個分頁。順序就是顯示順序。 */
+const TABS = [
+  { id: 'accounts', label: '帳戶' },
+  { id: 'stocks', label: '股票' },
+  { id: 'funds', label: '基金' },
+];
+
+/** 記住使用者上次停在哪一個分頁 */
+const ASSETS_TAB_KEY = 'assetsTab';
+
 export function createAssetsView() {
   const node = el('section.view.view--assets');
   const refs = {};
-  // 初值為 true：build() 期間股票區塊會先呼叫一次 onChange，
-  // 那時 hero 與 groups 都還沒掛上去，重畫沒有意義（而且緊接著就會 refresh()）。
+  // 初值為 true：build() 期間投資區塊會先呼叫一次 onChange，
+  // 那時 hero 還沒掛上去，重畫沒有意義（而且緊接著就會 refresh()）。
   let rendering = true;
+  let activeTab = 'accounts';
 
   build();
 
+  /**
+   * 資產頁分成三段而不是一條長捲軸。
+   *
+   * 原本是「淨資產 → 股票 → 基金 → 帳戶」一路往下接。持股一多（六十幾檔就有
+   * 四千多像素），基金與帳戶就被推到捲軸深處，等於不存在 ——
+   * 問題不在基金排最後，而是任何東西放在股票下面都會消失。
+   *
+   * 淨資產刻意留在分頁外面：它是這一頁要回答的問題，
+   * 放進某一段就等於有三分之二的時間看不到。
+   */
   function build() {
     clear(node);
     refs.hero = el('div.networth-hero');
+    refs.segment = el('div.segment.segment--stacked');
+    refs.tabHost = el('div.assets-tab');
     refs.groups = el('div.account-groups');
-    // 股票市值可能連結到某個帳戶，變動時淨資產與帳戶列表要一起更新。
-    // rendering 旗標擋掉 refresh() → stocks.refresh() → onChange 的重複重畫。
-    const onModuleChange = () => {
-      if (rendering) return;
-      renderHero();
-      renderGroups();
-    };
-    refs.stocks = createStocksSection({ onChange: onModuleChange });
-    refs.funds = createFundsSection({ onChange: onModuleChange });
 
-    node.append(
-      refs.hero,
-      refs.stocks.node,
-      refs.funds.node,
+    refs.accountsNode = el('div', {}, [
       el('div.section-head', {}, [
         el('h2.section-head__title', { text: '帳戶與資產' }),
         el('button.link-btn', { type: 'button', onClick: () => openAccountEditor(null) }, ['+ 新增']),
@@ -55,9 +66,91 @@ export function createAssetsView() {
           + '投資、不動產、貸款請用「手動估值」，直接填目前價值、定期更新即可 —— '
           + '這類帳戶不會出現在記帳頁，因為記在上面的收支並不會改變它們的估值。',
       }),
-    );
+    ]);
+
+    node.append(refs.hero, refs.segment, refs.tabHost);
+
+    const saved = store.getSetting(ASSETS_TAB_KEY, '');
+    if (TABS.some((t) => t.id === saved)) activeTab = saved;
 
     refresh();
+  }
+
+  /**
+   * 投資區塊的市值會寫進綁定的帳戶，因此變動時淨資產要跟著更新。
+   * rendering 旗標擋掉 refresh() → section.refresh() → onChange 的重複重畫。
+   */
+  function onModuleChange() {
+    if (rendering) return;
+    renderHero();
+    renderSegment();
+    if (activeTab === 'accounts') renderGroups();
+  }
+
+  /**
+   * 分頁內容第一次打開時才建立。
+   * 沒在看的分頁不必先把 DOM 做出來 —— 六十幾檔持股的列表尤其不值得。
+   */
+  function sectionFor(id) {
+    if (id === 'stocks' || id === 'funds') {
+      if (!refs[id]) {
+        // 建立時區塊自己會 refresh 一次並回呼 onChange，那時還沒掛上畫面
+        rendering = true;
+        try {
+          refs[id] = id === 'stocks'
+            ? createStocksSection({ onChange: onModuleChange })
+            : createFundsSection({ onChange: onModuleChange });
+        } finally {
+          rendering = false;
+        }
+      }
+      return refs[id];
+    }
+    return { node: refs.accountsNode, refresh: renderGroups };
+  }
+
+  /**
+   * 每一段標的是「筆數」而不是金額。
+   *
+   * 三段各放一個金額看起來很自然，但股票與基金的市值已經寫進它們綁定的帳戶裡，
+   * 也就包含在帳戶合計中。三個金額並排會讓人以為要相加，一加就重複計算 ——
+   * 筆數沒有這個歧義，而且同樣看得出「基金那裡有沒有東西」。
+   */
+  function tabCounts() {
+    return {
+      accounts: `${store.state.accounts.filter((a) => !a.archived).length} 個`,
+      stocks: `${store.stockPositions().filter((p) => p.shares > 0).length} 檔`,
+      funds: `${store.fundPositions().filter((p) => p.units > 0).length} 檔`,
+    };
+  }
+
+  function renderSegment() {
+    clear(refs.segment);
+    const counts = tabCounts();
+
+    for (const tab of TABS) {
+      refs.segment.append(el(`button.segment__item${activeTab === tab.id ? '.is-active' : ''}`, {
+        type: 'button',
+        'aria-pressed': String(activeTab === tab.id),
+        onClick: () => setTab(tab.id),
+      }, [
+        el('span', { text: tab.label }),
+        el('span.segment__count', { text: counts[tab.id] }),
+      ]));
+    }
+  }
+
+  async function setTab(id) {
+    if (id === activeTab) return;
+    activeTab = id;
+    refresh();
+
+    // 換了分頁還停在原本的捲動位置，看到的會是新內容的中段
+    const scroller = node.parentElement;
+    if (scroller) scroller.scrollTop = 0;
+
+    // silent：這裡已經自己重畫過了，再觸發一次全域通知只是把列表重畫第二次
+    await store.setSetting(ASSETS_TAB_KEY, id, { silent: true });
   }
 
   function renderHero() {
@@ -322,9 +415,14 @@ export function createAssetsView() {
     rendering = true;
     try {
       renderHero();
-      refs.stocks.refresh();
-      refs.funds.refresh();
-      renderGroups();
+      renderSegment();
+
+      const section = sectionFor(activeTab);
+      if (section.node.parentNode !== refs.tabHost) {
+        clear(refs.tabHost);
+        refs.tabHost.append(section.node);
+      }
+      section.refresh();
     } finally {
       rendering = false;
     }

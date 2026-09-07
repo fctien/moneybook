@@ -620,10 +620,16 @@ export function currenciesNeedingRate() {
 
 // ------------------------------------------------------------- 設定
 
-export async function setSetting(key, value) {
+/**
+ * @param {object} [opts]
+ * @param {boolean} [opts.silent] 不觸發畫面通知。
+ *   呼叫端自己已經重畫過時用得上 —— 純介面偏好（例如目前停在哪個分頁）
+ *   再觸發一次全域通知，只是把整份列表重畫第二次。
+ */
+export async function setSetting(key, value, { silent = false } = {}) {
   await db.setMeta(key, value);
   state.settings[key] = value;
-  notify();
+  if (!silent) notify();
 }
 
 export function getSetting(key, fallback = null) {
