@@ -9,7 +9,7 @@
  * 清除快取只會讓 App 重新下載程式碼，不會動到任何一筆帳。
  */
 
-const CACHE_VERSION = 'moneybook-v1.17.0';
+const CACHE_VERSION = 'moneybook-v1.18.0';
 
 const APP_SHELL = [
   './',
@@ -47,6 +47,7 @@ const APP_SHELL = [
   './js/views/scan.js',
   './js/views/stocks.js',
   './js/views/funds.js',
+  './js/views/installhelp.js',
   './js/views/stockimport.js',
   './icons/icon-192.png',
   './icons/icon-512.png',

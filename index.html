@@ -32,6 +32,15 @@
       </noscript>
     </div>
   </div>
+  <script>
+    // beforeinstallprompt 可能在 module script 執行前就發出。
+    // 先在這裡攔住並存起來，app.js 載入後再接手，否則那一次就錯過了。
+    window.__installPrompt = {};
+    window.addEventListener('beforeinstallprompt', function (e) {
+      e.preventDefault();
+      window.__installPrompt.event = e;
+    });
+  </script>
   <script type="module" src="./js/app.js"></script>
 </body>
 </html>

@@ -9,8 +9,12 @@ import { createLedgerView } from './views/ledger.js';
 import { createAssetsView } from './views/assets.js';
 import { createReportView } from './views/report.js';
 import { createSettingsView } from './views/settings.js';
+import { openInstallHelp } from './views/installhelp.js';
+import {
+  isStandalone, detectPlatform, createInstallPromptController, shouldShowInstallBanner,
+} from './lib/install.js';
 
-export const APP_VERSION = '1.17.0';
+export const APP_VERSION = '1.18.0';
 
 const TABS = [
   { id: 'entry', label: '記帳', icon: '✏️' },
@@ -22,6 +26,12 @@ const TABS = [
 
 const views = {};
 let currentTab = 'entry';
+
+/** 上次關掉「加到主畫面」提示列的時間 */
+const INSTALL_BANNER_KEY = 'installBannerDismissedAt';
+
+// 要在任何畫面建立前就開始聽，事件只發一次
+const installer = createInstallPromptController();
 
 async function main() {
   const root = $('#app');
@@ -46,11 +56,12 @@ async function main() {
   });
   views.assets = createAssetsView();
   views.report = createReportView();
-  views.settings = createSettingsView({ appVersion: APP_VERSION });
+  views.settings = createSettingsView({ appVersion: APP_VERSION, installer, openInstallHelp });
 
   const main = el('main.app__main', { id: 'main' });
   const tabbar = buildTabBar();
-  root.append(main, tabbar);
+  const banner = buildInstallBanner();
+  root.append(main, banner, tabbar);
 
   // 只有目前分頁掛在 DOM 上，切換時整個換掉。
   // 資料量小、DOM 也不大，這比維持五份隱藏 DOM 更省記憶體也更好推理。
@@ -104,6 +115,74 @@ function startAutoQuoteUpdates() {
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') run();
   });
+}
+
+/**
+ * 「加到主畫面」提示列，夾在內容與分頁列之間。
+ *
+ * 放在設定頁裡的說明，沒點進設定的人永遠看不到 —— 而 iOS 會清掉
+ * 七天沒開的網站資料，這不是體驗問題，是會不會掉資料的問題。
+ * 所以要擺在一定看得到的地方，但也要能關掉：關掉後兩週內不再出現。
+ *
+ * 位置刻意在畫面最下方：iOS Safari 的分享按鈕就在我們分頁列的正下方，
+ * 提示列裡的「往下找 ⬆︎」指的就是那裡。
+ */
+function buildInstallBanner() {
+  const node = el('div.install-banner', { hidden: true });
+
+  const render = () => {
+    clear(node);
+    const show = shouldShowInstallBanner({
+      standalone: isStandalone(),
+      platform: detectPlatform(),
+      dismissedAt: store.getSetting(INSTALL_BANNER_KEY, null),
+      now: Date.now(),
+    });
+    node.hidden = !show;
+    if (!show) return;
+
+    const native = installer.available();
+    const platform = detectPlatform();
+    // 三種情境三句話：能一鍵裝的講方便，iOS 講風險（會掉資料），Android 沒拿到事件時講路徑
+    const message = native
+      ? '一鍵安裝，之後從圖示開啟就像一般 App。'
+      : platform === 'ios'
+        ? '否則 iOS 可能在閒置七天後清掉你的帳目。'
+        : '從 Chrome 選單安裝，之後從圖示開啟就像一般 App。';
+
+    node.append(
+      el('span.install-banner__icon', { text: '📲' }),
+      el('div.install-banner__text', {}, [
+        el('strong', { text: '加到主畫面' }),
+        el('span', { text: message }),
+      ]),
+      el('button.btn.btn--primary.btn--sm', {
+        type: 'button',
+        onClick: async () => {
+          if (!native) return openInstallHelp({ installer });
+          const outcome = await installer.prompt();
+          if (outcome === 'accepted') toast('已加到主畫面', 'success');
+          else if (outcome === 'unavailable') openInstallHelp({ installer });
+        },
+      }, [native ? '安裝' : '怎麼做']),
+      el('button.install-banner__close', {
+        type: 'button',
+        'aria-label': '暫時關閉',
+        onClick: async () => {
+          await store.setSetting(INSTALL_BANNER_KEY, Date.now(), { silent: true });
+          render();
+        },
+      }, ['✕']),
+    );
+  };
+
+  render();
+  // 拿到 beforeinstallprompt 或安裝完成時，按鈕文字與顯示與否都會變
+  installer.onChange(() => {
+    if (installer.justInstalled()) toast('已加到主畫面，之後請從圖示開啟', 'success', 4000);
+    render();
+  });
+  return node;
 }
 
 function buildTabBar() {
@@ -184,7 +263,13 @@ async function maybeShowFirstRunGuide() {
         el('li', { text: '「記帳」頁用數字鍵盤快速記錄收支，可以直接打 35+50 這種算式。' }),
         el('li', { text: '按「📷 掃電子發票」拍發票下方的兩個方塊條碼，品項與金額會自動帶入。' }),
         el('li', { text: '「資產」頁可手動填入股票、不動產、貸款的價值，算出淨資產。' }),
-        el('li', { text: '請把本頁「加到主畫面」，否則 iOS 可能在閒置七天後清掉資料。' }),
+        el('li', {}, [
+          el('span', { text: '請把本頁「加到主畫面」，否則 iOS 可能在閒置七天後清掉資料。' }),
+          el('button.link-btn', {
+            type: 'button',
+            onClick: () => openInstallHelp({ installer }),
+          }, ['看怎麼做']),
+        ]),
         el('li', { text: '每個月到「設定」匯出一次備份檔，這是資料遺失時唯一的救援方式。' }),
       ]),
       el('div.sheet__actions', {}, [

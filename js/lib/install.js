@@ -100,3 +100,89 @@ export function installGuide(platform = detectPlatform(), nonSafari = isIOSNonSa
     warnings: ['電腦上安裝與否影響不大，資料一樣存在瀏覽器裡。手機才是真的需要安裝。'],
   };
 }
+
+// ── 一鍵安裝（Android／桌面 Chrome、Edge） ─────────────────────
+// 這些瀏覽器會在符合安裝條件時發出 beforeinstallprompt，把事件留下來
+// 就能在使用者按按鈕時叫出系統的安裝對話框 —— 真正的「一鍵釘上」。
+// iOS Safari 沒有這個事件，永遠只能用步驟說明。
+
+/**
+ * 建立安裝提示的控制器。
+ *
+ * @param {object} [target] 事件來源，預設是 window；測試時可注入假物件
+ * @param {object} [stash] 早於本模組載入前就攔到的事件（見 index.html）
+ */
+export function createInstallPromptController(target = globalThis, stash = globalThis.__installPrompt) {
+  let deferred = stash?.event ?? null;
+  let installed = false;
+  const listeners = new Set();
+
+  const emit = () => { for (const fn of listeners) fn(); };
+
+  target.addEventListener?.('beforeinstallprompt', (e) => {
+    // 攔下瀏覽器自己的迷你提示列，改由我們的按鈕觸發，時機才由使用者決定
+    e.preventDefault?.();
+    deferred = e;
+    emit();
+  });
+
+  target.addEventListener?.('appinstalled', () => {
+    deferred = null;
+    installed = true;
+    emit();
+  });
+
+  return {
+    /** 現在能不能直接叫出系統安裝對話框 */
+    available: () => deferred !== null,
+    /** 剛剛才安裝完成（用來顯示成功訊息） */
+    justInstalled: () => installed,
+    /**
+     * 叫出系統安裝對話框。
+     * @returns {Promise<'accepted'|'dismissed'|'unavailable'>}
+     */
+    async prompt() {
+      if (!deferred) return 'unavailable';
+      const ev = deferred;
+      // 每個事件只能 prompt 一次，先清掉免得重複按時炸出例外
+      deferred = null;
+      try {
+        await ev.prompt();
+        const choice = await ev.userChoice;
+        const outcome = choice?.outcome === 'accepted' ? 'accepted' : 'dismissed';
+        // 使用者按了取消時瀏覽器不會再發一次事件；把它留著讓按鈕還能用
+        if (outcome === 'dismissed') deferred = ev;
+        emit();
+        return outcome;
+      } catch {
+        return 'unavailable';
+      }
+    },
+    onChange(fn) {
+      listeners.add(fn);
+      return () => listeners.delete(fn);
+    },
+  };
+}
+
+/** 關掉提示列之後隔多久再提醒。iOS 七天沒開就會清資料，兩週是可接受的上限。 */
+export const BANNER_SNOOZE_DAYS = 14;
+
+/**
+ * 要不要顯示「加到主畫面」提示列。
+ *
+ * 純函式，時間與狀態都由外面給，才測得到。
+ * 只在手機顯示：電腦上安裝與否不影響資料安全，提示列只會變成噪音。
+ *
+ * @param {object} o
+ * @param {boolean} o.standalone 已經是獨立 App
+ * @param {'ios'|'android'|'desktop'} o.platform
+ * @param {number|null} o.dismissedAt 上次關掉的時間（毫秒），沒關過是 null
+ * @param {number} o.now
+ */
+export function shouldShowInstallBanner({ standalone, platform, dismissedAt, now }) {
+  if (standalone) return false;
+  if (platform !== 'ios' && platform !== 'android') return false;
+  if (!dismissedAt) return true;
+  return now - dismissedAt >= BANNER_SNOOZE_DAYS * 86_400_000;
+}

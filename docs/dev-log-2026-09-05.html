@@ -1404,7 +1404,79 @@ FinMind 配額用完時 HTTP 仍然是 200，要靠回應內容裡的 <code>stat
 </section>
 
 <section>
-<h2>24. 待辦</h2>
+<h2>24. 「加到主畫面」提示列與一鍵安裝（v1.18.0）</h2>
+<p>
+需求是「讓使用者可以輕易釘上」。原本只有設定頁裡的一段文字說明 ——
+沒點進設定的人永遠看不到，而 iOS 會清掉七天沒開的網站資料，
+這不是體驗問題，是會不會掉資料的問題。
+</p>
+
+<h3>24.1 兩種平台，兩種能力</h3>
+<table>
+<tr><th>平台</th><th>能做到什麼</th></tr>
+<tr><td>Android Chrome、桌面 Chrome／Edge</td>
+    <td>瀏覽器會發 <code>beforeinstallprompt</code>，攔下來存著，使用者按按鈕時叫出系統安裝對話框。
+        <strong>真正的一鍵釘上。</strong></td></tr>
+<tr><td>iOS Safari</td>
+    <td>沒有任何 API。只能把步驟講清楚、把要找的圖示畫出來。</td></tr>
+</table>
+
+<div class="bug">
+<h3>24.2 事件可能在程式載入前就發出</h3>
+<dl>
+  <dt>問題</dt><dd><code>beforeinstallprompt</code> 只發一次。app.js 是 module script，
+      執行時機比 inline script 晚；若事件在那之前就發了，這一次就錯過，
+      按鈕永遠不會出現</dd>
+  <dt>作法</dt><dd>index.html 裡放一小段 inline script 先攔住事件存到
+      <code>window.__installPrompt</code>，app.js 載入後再接手</dd>
+</dl>
+</div>
+
+<h3>24.3 提示列</h3>
+<p>
+夾在內容與分頁列之間、一定看得到的位置。刻意放在<strong>最下方</strong>：
+iOS Safari 的分享按鈕就在我們分頁列的正下方，使用者往下找就對了。
+</p>
+<ul>
+  <li>能一鍵安裝時按鈕是「安裝」，按下去直接跳系統對話框</li>
+  <li>不能時是「怎麼做」，開步驟說明</li>
+  <li>文案依平台不同：iOS 講風險（會掉資料），Android 沒拿到事件時講路徑（Chrome 選單）</li>
+  <li>可以關掉，關掉後兩週內不再出現 —— 不能永久關：兩週後再提醒一次的代價，遠小於資料被清掉</li>
+  <li>只在手機顯示。電腦上安裝與否不影響資料安全，提示列只會變成噪音</li>
+</ul>
+
+<h3>24.4 iOS 的步驟用畫的</h3>
+<p>
+使用者要在分享選單裡找的是一個<strong>圖示</strong>，文字描述「向上箭頭的方框」
+不如直接把那個方框畫出來。說明畫面裡用內嵌 SVG 畫了「分享」與「加入主畫面」兩個圖示，
+並模擬分享選單那一列的長相。離線也顯示得出來。
+</p>
+
+<h3>24.5 安裝控制器的三個細節</h3>
+<ul>
+  <li>每個事件只能 <code>prompt()</code> 一次，呼叫前先清掉，重複按不會炸例外</li>
+  <li>使用者按「取消」時瀏覽器不會再發一次事件 —— 把它留著，按鈕還能再用</li>
+  <li><code>appinstalled</code> 之後清掉事件、顯示成功訊息，設定頁與提示列都跟著重畫</li>
+</ul>
+
+<h3>24.6 驗證</h3>
+<table>
+<tr><th>情境</th><th>結果</th></tr>
+<tr><td>電腦</td><td><span class="pill ok">提示列不顯示</span></td></tr>
+<tr><td>手機（Android UA）</td><td><span class="pill ok">提示列出現，文案「從 Chrome 選單安裝」</span></td></tr>
+<tr><td>模擬 beforeinstallprompt</td><td><span class="pill ok">按鈕變「安裝」，按下去 prompt → 「已加到主畫面」</span></td></tr>
+<tr><td>iOS 版說明</td><td><span class="pill ok">兩個圖示與模擬選單列正確繪出</span></td></tr>
+<tr><td>按 ✕</td><td><span class="pill ok">立即隱藏，時間寫進設定</span></td></tr>
+<tr><td>設定頁</td><td><span class="pill ok">卡片改用共用說明畫面；有事件時多一列「立即安裝」</span></td></tr>
+<tr><td>自動測試</td><td><span class="pill ok">291 項全數通過（新增 9 項：控制器與顯示條件）</span></td></tr>
+</table>
+<p class="muted">
+iOS 上的實際安裝無法在電腦上驗證，要在 iPhone 的 Safari 實測一次。
+</p>
+</section>
+
+<section>
+<h2>25. 待辦</h2>
 <ul>
   <li>基金模組<strong>後續階段</strong>：定期定額的交易明細摺疊、對帳單 CSV 匯入、
       自動抓淨值與匯率（沿用第 21 節的同意機制，同樣預設關閉）</li>

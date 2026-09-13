@@ -1,0 +1,701 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MoneyBook 多人共用與發票照片規劃</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --surface: #fff; --border: #e3e6ea; --text: #1a1d21;
+    --muted: #656d76; --accent: #2563eb; --ok: #16a34a; --bad: #dc2626;
+    --warn: #b45309; --warn-bg: #fef3c7; --code-bg: #f1f3f5;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1115; --surface: #171a1f; --border: #2b3038; --text: #e6e8eb;
+      --muted: #9aa4b0; --accent: #60a5fa; --ok: #4ade80; --bad: #f87171;
+      --warn: #fbbf24; --warn-bg: #3a2a06; --code-bg: #1e2229;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 32px 20px 64px; background: var(--bg); color: var(--text);
+    font-family: system-ui, -apple-system, "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", sans-serif;
+    line-height: 1.7; font-size: 15px;
+  }
+  .wrap { max-width: 880px; margin: 0 auto; }
+  header { border-bottom: 2px solid var(--accent); padding-bottom: 16px; margin-bottom: 28px; }
+  h1 { font-size: 25px; margin: 0 0 6px; }
+  .meta { color: var(--muted); font-size: 13px; }
+  .meta code { background: var(--code-bg); padding: 2px 6px; border-radius: 4px; font-size: 12px; }
+  h2 { font-size: 18px; margin: 36px 0 12px; padding-left: 11px; border-left: 4px solid var(--accent); }
+  h3 { font-size: 15px; margin: 22px 0 8px; }
+  section { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 18px 22px; margin-bottom: 18px; }
+  table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 14px; }
+  th, td { border: 1px solid var(--border); padding: 8px 11px; text-align: left; vertical-align: top; }
+  th { background: var(--code-bg); font-weight: 600; }
+  code { background: var(--code-bg); padding: 2px 5px; border-radius: 4px; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 13px; }
+  pre { background: var(--code-bg); padding: 12px 14px; border-radius: 8px; overflow-x: auto; font-size: 13px; line-height: 1.5; }
+  pre code { background: none; padding: 0; }
+  ul, ol { padding-left: 22px; }
+  li { margin: 5px 0; }
+  .pill { display: inline-block; border-radius: 999px; padding: 2px 11px; font-size: 12px; font-weight: 600; }
+  .pill.ok { background: rgba(22,163,74,.14); color: var(--ok); }
+  .pill.bad { background: rgba(220,38,38,.14); color: var(--bad); }
+  .note { background: var(--warn-bg); color: var(--warn); border-radius: 8px; padding: 11px 14px; font-size: 14px; margin: 14px 0; }
+  .note h3 { color: var(--warn); }
+  .muted { color: var(--muted); }
+  .decided { border-left: 4px solid var(--ok); padding-left: 14px; margin: 16px 0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>MoneyBook 多人共用與發票照片 &mdash; 可行性評估與實作規劃</h1>
+  <div class="meta">
+    2026-09-08 擬定&nbsp;·&nbsp;基準版本 <code>v1.17.0</code>&nbsp;·&nbsp;
+    基準 commit <code>5574cdd</code>（工作區乾淨）&nbsp;·&nbsp;
+    狀態：<strong>待拍板，尚未動工</strong>
+  </div>
+</header>
+
+<section>
+<h2>0. 需求</h2>
+<ol>
+  <li><strong>僅需要簡易記帳功能</strong></li>
+  <li><strong>要提供多人能共用</strong></li>
+  <li><strong>能夠儲存發票，照相後儲存</strong></li>
+</ol>
+<p>問題：這些需求用 PWA 能完成嗎？</p>
+</section>
+
+<section>
+<h2>1. 結論先講</h2>
+
+<table>
+<tr><th>需求</th><th>PWA 做得到嗎</th><th>要付出什麼</th></tr>
+<tr>
+  <td>1. 簡易記帳</td>
+  <td><span class="pill ok">做得到</span></td>
+  <td>幾乎零成本。功能早就有了，要做的是<strong>把股票／基金收起來</strong>，不是再寫新東西</td>
+</tr>
+<tr>
+  <td>2. 多人共用</td>
+  <td><span class="pill ok">做得到</span><br><span class="muted">但必須加後端</span></td>
+  <td><strong>本專案最大的一次架構改變。</strong>前端仍是純靜態檔，
+      但必須外接一個資料庫服務，且「資料只存在你的裝置上」這條原則會被打破</td>
+</tr>
+<tr>
+  <td>3. 發票照相儲存</td>
+  <td><span class="pill ok">做得到</span></td>
+  <td>純前端就能完成。拍照的程式碼<strong>現在就已經有了</strong>
+      （<code>qrscan.js</code> 的 <code>capturePhoto()</code>）。
+      只有「照片要不要跟著多人共用」會牽到需求 2</td>
+</tr>
+</table>
+
+<p>
+一句話：<strong>三項都可行，PWA 不是限制。真正的分水嶺是需求 2 &mdash;&mdash;
+它把這個 App 從「單機工具」變成「有帳號的服務」。</strong>
+需求 1 和 3 可以立刻做、不必等需求 2；需求 2 需要您先拍板兩件事（見第 9 節）。
+</p>
+</section>
+
+<section>
+<h2>2. 需求一：簡易記帳</h2>
+
+<p>
+現況其實是<strong>反過來的問題</strong>：記帳功能一開始就完成了，
+後來長出股票（v1.3&ndash;v1.16）與基金（v1.15）兩大模組，介面因此變重。
+「只要簡易記帳」不是要補功能，是要<strong>把後來長出來的東西收起來</strong>。
+</p>
+
+<div class="decided">
+<h3>2.1 做法：加一個「簡易模式」開關，不刪程式碼</h3>
+<table>
+<tr><th></th><th>刪掉股票／基金</th><th>做成開關（建議）</th></tr>
+<tr><td>介面清爽度</td><td>一樣</td><td>一樣</td></tr>
+<tr><td>已投入的 200 多項測試</td><td>一併作廢</td><td>全部保留</td></tr>
+<tr><td>之後想用回來</td><td>要從版控挖回來重接</td><td>設定裡按一下</td></tr>
+<tr><td>App 體積</td><td>少約 100 KB</td><td>不變 &mdash; 但股票模組本來就是
+    <strong>動態 import</strong>，沒開就不會載入，實際啟動速度沒有差別</td></tr>
+</table>
+<p>
+既然沒開就不會下載，刪掉的唯一好處只剩「repo 比較小」，
+代價卻是丟掉 v1.3 到 v1.17 累積的所有東西。<strong>不划算，改用開關。</strong>
+</p>
+</div>
+
+<h3>2.2 具體改動</h3>
+<ul>
+  <li>設定頁新增「進階功能」區塊：<code>股票</code>、<code>基金</code> 兩個開關，<strong>預設關閉</strong></li>
+  <li>資產頁的三個分頁（帳戶／股票／基金）依開關決定要不要出現；只剩帳戶時不顯示分頁列</li>
+  <li>已經有股票或基金資料的使用者，升級時<strong>自動維持開啟</strong> &mdash;
+      不能因為改版就讓人以為資料不見了</li>
+  <li>底部五個分頁維持不變（記帳／明細／資產／報表／設定）</li>
+</ul>
+<p class="muted">
+估算：動到 <code>views/settings.js</code>、<code>views/assets.js</code>
+與 <code>store.js</code> 的設定值，加 3&ndash;5 項測試。規模小。
+</p>
+</section>
+
+<section>
+<h2>3. 需求二：多人共用</h2>
+
+<h3>3.1 為什麼 PWA 本身做不到</h3>
+<p>
+PWA 的離線能力靠 Service Worker（快取程式碼）與 IndexedDB（存資料），
+這兩者都<strong>綁在單一瀏覽器的單一來源上</strong>。
+同一支手機換個瀏覽器就讀不到，更不用說換一台手機。
+瀏覽器沒有任何 API 能讓兩台裝置直接看到彼此的 IndexedDB &mdash;
+這是安全模型的根本，不是「還沒實作」。
+</p>
+<p>
+所以多人共用<strong>一定要有一個大家都連得到的地方存資料</strong>。
+問題不是「PWA 行不行」，而是「那個地方放哪裡」。
+</p>
+
+<h3>3.2 先排除三個「不用後端」的想法</h3>
+<table>
+<tr><th>想法</th><th>結果</th><th>原因</th></tr>
+<tr>
+  <td>互相傳備份檔，用現有的「合併匯入」</td>
+  <td><span class="pill bad">不夠用</span></td>
+  <td>現有的 <code>mergeAllData()</code> 確實能合併，但要手動傳、手動匯入。
+      兩人同一天各記五筆，得記得誰傳給誰、誰匯入了沒 &mdash;
+      <strong>漏一次就對不起來，而且不會有任何提示</strong></td>
+</tr>
+<tr>
+  <td>WebRTC 讓兩支手機直接連</td>
+  <td><span class="pill bad">不可行</span></td>
+  <td>WebRTC 仍需要一台伺服器幫忙牽線（所以還是有後端），
+      而且<strong>兩個人必須同時開著 App</strong>。
+      記帳是各記各的 &mdash; 太太在早市記一筆時先生正在上班，這個前提不成立</td>
+</tr>
+<tr>
+  <td>把資料檔放共用的 iCloud／Google 雲端硬碟資料夾</td>
+  <td><span class="pill bad">不可行</span></td>
+  <td>網頁不能自行讀寫使用者的雲端硬碟。
+      File System Access API 在 iOS Safari 完全不支援，
+      且無論如何都要使用者每次手動挑檔案。改用 Drive API 則需要 OAuth &mdash;
+      繞一圈還是後端，只是換成 Google 的規則</td>
+</tr>
+</table>
+
+<h3>3.3 後端選型</h3>
+<p>
+本專案的硬性條件：<strong>沒有 npm、沒有建置流程、沒有 CDN 相依，前端仍放 GitHub Pages</strong>。
+這條件會直接篩掉一些選項。
+</p>
+<table>
+<tr><th>方案</th><th>能否只用 <code>fetch</code></th><th>評語</th></tr>
+<tr>
+  <td><strong>Supabase</strong><br>（Postgres + Auth + Storage）</td>
+  <td><span class="pill ok">可以</span></td>
+  <td><strong>建議採用。</strong>資料、登入、檔案儲存三者都提供標準 REST，
+      全部用 <code>fetch</code> 打得到，<strong>一行 SDK 都不必載</strong>。
+      權限由資料庫本身的 Row Level Security 控制，前端拿不到不該拿的資料</td>
+</tr>
+<tr>
+  <td>Firebase<br>（Firestore）</td>
+  <td><span class="pill bad">實務上不行</span></td>
+  <td>離線同步是它最強的地方，但那些能力都在 SDK 裡（壓縮後仍有數百 KB）。
+      要嘛引入 CDN、要嘛開始有建置流程 &mdash; 兩者都違反本專案既有的原則</td>
+</tr>
+<tr>
+  <td>Cloudflare<br>（Workers + D1 + R2）</td>
+  <td><span class="pill ok">可以</span></td>
+  <td>免費額度大方，<strong>不會因為閒置被暫停</strong>。
+      但 API 要自己寫、自己維護、權限檢查也要自己寫 &mdash;
+      等於多養一個後端專案。列為<strong>備案</strong></td>
+</tr>
+<tr>
+  <td>自架於 Render</td>
+  <td><span class="pill ok">可以</span></td>
+  <td>您已有 Render 的使用經驗。但免費方案閒置會休眠，冷啟動十幾秒 &mdash;
+      記一筆帳要等那麼久並不合理；資料庫也要自己備份。<strong>不建議</strong></td>
+</tr>
+</table>
+
+<div class="decided">
+<h3>3.4 建議：Supabase ＋ 純 fetch，前端仍留在 GitHub Pages</h3>
+<p>
+前端的架構一個字都不用改 &mdash; 依舊是靜態檔、依舊 GitHub Pages、依舊沒有建置流程。
+新增的只是一支 <code>js/lib/cloud.js</code>，裡面全是 <code>fetch</code>。
+</p>
+<p class="muted">
+注意一個與直覺相反的地方：Supabase 的 anon key 是<strong>設計上就要公開</strong>的
+（會出現在前端原始碼裡），安全性由 RLS 政策保證，不是靠把金鑰藏起來。
+</p>
+</div>
+
+<h3>3.5 資料模型</h3>
+<p>
+共用的單位是<strong>帳本</strong>而不是「帳號」&mdash;
+這樣一個人可以同時擁有「家庭共用帳」與「自己的私帳」。
+</p>
+<pre><code>ledgers          帳本      id, name, owner_id, created_at
+ledger_members   成員      ledger_id, user_id, role(owner/editor/viewer), joined_at
+transactions     收支      id, ledger_id, date, amount_cents, category_id,
+                           account_id, note, created_by, updated_at, deleted
+accounts         帳戶      id, ledger_id, ..., updated_at, deleted
+categories       分類      id, ledger_id, ..., updated_at, deleted
+attachments      發票照片  id, ledger_id, tx_id, storage_path, bytes, updated_at, deleted</code></pre>
+<p>
+RLS 政策的核心只有一條：<em>「這一列的 <code>ledger_id</code> 必須出現在我的
+<code>ledger_members</code> 裡」</em>。寫入另外檢查 <code>role</code>。
+</p>
+<div class="note">
+<strong>這是整個計畫風險最高的一點。</strong>RLS 寫錯等於別人的帳本被讀得到，
+而且平常操作完全看不出異常。因此驗收必須有一項<strong>刻意的越權測試</strong>：
+用 A 的 token 去讀 B 的帳本，<strong>必須拿到 0 筆</strong>而不是錯誤訊息 &mdash;
+拿到 0 筆才代表政策真的生效，拿到錯誤訊息可能只是網址打錯。
+</div>
+
+<h3>3.6 同步怎麼做</h3>
+<p>
+<strong>不改寫現有的 IndexedDB 架構。</strong>本地依舊是唯一的讀取來源，
+畫面切換依舊零延遲，離線依舊完全可用 &mdash; 只是多一層在背景推拉的同步層。
+這也讓現有的 210 項測試原封不動。
+</p>
+<table>
+<tr><th>機制</th><th>做法</th><th>為什麼</th></tr>
+<tr>
+  <td>寄件匣（outbox）</td>
+  <td>每一次本地寫入，同時記一筆待送清單。連上網才送，送成功才清掉</td>
+  <td>離線記的帳不能掉。這是離線優先 App 的標準做法</td>
+</tr>
+<tr>
+  <td>墓碑（tombstone）</td>
+  <td>刪除改成標記 <code>deleted=true</code>，不真的移除</td>
+  <td><strong>沒有墓碑的同步，刪掉的資料會從另一台裝置復活</strong>，
+      而且使用者只會覺得「我明明刪過了」</td>
+</tr>
+<tr>
+  <td>後寫贏（LWW）</td>
+  <td>比 <code>updated_at</code>，晚的蓋掉早的，逐筆比對</td>
+  <td>記帳的衝突極罕見 &mdash; 兩個人幾乎不會同時改同一筆。
+      為此引入 CRDT 之類的機制，複雜度遠大於收益</td>
+</tr>
+<tr>
+  <td>拉取用增量</td>
+  <td>只要 <code>updated_at &gt; 上次同步時間</code> 的資料</td>
+  <td>每次全量拉會隨著年份累積愈來愈慢，而且吃流量</td>
+</tr>
+</table>
+<p>
+合併邏輯全部寫成<strong>純函式</strong>（<code>js/lib/sync.js</code>）：
+輸入兩份資料、輸出合併結果，不碰網路也不碰資料庫 &mdash;
+這樣才測得動，也才敢改。與 <code>portfolio.js</code>、<code>funds.js</code> 是同一個路數。
+</p>
+
+<h3>3.7 邀請怎麼運作</h3>
+<ol>
+  <li>帳本擁有者按「邀請成員」，產生一組<strong>六位邀請碼</strong>（有效期 7 天，可撤銷）</li>
+  <li>對方註冊／登入後輸入邀請碼，即加入該帳本</li>
+  <li>成員清單可看到誰在裡面、各自的權限，擁有者可移除成員</li>
+  <li>明細每一筆顯示<strong>是誰記的</strong> &mdash;
+      共用帳本裡這是必要資訊，否則對不上帳時無從查起</li>
+</ol>
+<p class="muted">
+用邀請碼而不是「輸入對方 email 直接加入」：後者只要打錯一個字，
+就把陌生人加進自己的家庭帳本，而且雙方都不會發現。
+</p>
+
+<div class="note">
+<h3 style="margin-top:0">3.8 這件事會改掉專案的核心宣稱</h3>
+<p>
+README 現在最上面寫著「<strong>資料完全存在你自己的裝置裡，不上傳任何伺服器</strong>」。
+一旦開始同步，這句話對共用帳本就<strong>不再成立</strong>。
+</p>
+<p>建議的處理方式，也是我認為唯一誠實的做法：</p>
+<ul>
+  <li><strong>單機模式維持預設。</strong>不登入就跟現在一模一樣，一個位元組都不外傳</li>
+  <li>雲端同步是<strong>使用者主動開啟</strong>的功能，開啟前明白告知資料會存到哪裡</li>
+  <li>README 與 App 內的說明同步改寫，<strong>不模糊帶過</strong></li>
+</ul>
+<p>
+順帶一提：開了同步之後，「每月手動備份」的壓力會小很多 &mdash;
+手機掉了資料還在雲端。這是需求 2 的附加收穫。
+</p>
+</div>
+
+<h3>3.9 中國大陸的連線問題（2026-09-08 查證）</h3>
+<div class="note">
+<strong>如果有人要在中國大陸使用，上面的整套選型都不成立。</strong>
+這不是速度快慢的問題，是連不連得上的問題。
+</div>
+<table>
+<tr><th>服務</th><th>大陸可用性</th><th>依據</th></tr>
+<tr>
+  <td><strong>Supabase</strong></td>
+  <td><span class="pill bad">被封鎖</span></td>
+  <td>官方 repo 有長期未解的 issue：網站與 API 都被 GFW 擋下，
+      magic link 請求沒有回應、Realtime 連線逾時。<strong>目前無中國區節點</strong></td>
+</tr>
+<tr>
+  <td>Firebase（Google）</td>
+  <td><span class="pill bad">完全封鎖</span></td>
+  <td>Google 全域名封鎖，沒有例外</td>
+</tr>
+<tr>
+  <td>Cloudflare Workers</td>
+  <td><span class="pill bad">不可靠</span></td>
+  <td><code>workers.dev</code> 在封鎖清單、DNS 被污染。
+      改用自訂網域「有些人連得到、有些人不行」&mdash; 依 ISP 而異，不能當方案</td>
+</tr>
+<tr>
+  <td>GitHub Pages（<strong>目前的前端</strong>）</td>
+  <td><span class="pill bad">慢且不穩</span></td>
+  <td>沒有全面封鎖，但時通時不通。<strong>連前端網頁本身都進不去</strong></td>
+</tr>
+</table>
+<p>
+換句話說：現在這個 App 在中國大陸<strong>連打開都有問題</strong>，不只是同步不了。
+</p>
+
+<h3>3.10 要涵蓋大陸時的兩條路</h3>
+<table>
+<tr><th></th><th>境內雲 ＋ ICP 備案</th><th>香港節點（免備案）</th></tr>
+<tr><td>大陸連線</td><td>最快最穩</td><td>連得到，但延遲較高、丟包較多</td></tr>
+<tr><td>手續</td><td><strong>要 ICP 備案</strong> &mdash; 需中國實名主體、約 20 天審核，
+    台灣個人辦理相當麻煩</td><td>不需要備案，買了就能用</td></tr>
+<tr><td>費用</td><td>伺服器費用</td><td>輕量伺服器約每月 25 人民幣起</td></tr>
+<tr><td>內容監管</td><td>備案後受監管</td><td>不受</td></tr>
+<tr><td>工作量</td><td colspan="2"><strong>兩條路都要自己寫後端</strong> &mdash;
+    Supabase 幫忙做掉的登入、權限、REST API、備份，全部得自己來。
+    比接 Supabase 多出約一倍的工作量，而且是長期的維運責任</td></tr>
+</table>
+<p>
+記帳的同步量極小（一次幾十 KB），香港節點的延遲與丟包<strong>對這個用途其實可以接受</strong> &mdash;
+它不是影音串流。因此若真的需要涵蓋大陸，<strong>香港節點是較務實的折衷</strong>。
+</p>
+
+<div class="decided">
+<h3>3.11 但先分清楚是哪一種情境</h3>
+<table>
+<tr><th>情境</th><th>建議</th></tr>
+<tr>
+  <td><strong>偶爾出差／短期停留大陸</strong></td>
+  <td><strong>不必為它改架構。</strong>本 App 是離線優先 &mdash;
+      在大陸照樣能記帳，只是同步不上去，回台灣後自動補送。
+      這正是離線優先架構的天然好處。<br>
+      前提是：<strong>同步失敗絕不能擋住記帳</strong>（已列為第 7 節的風險對策）</td>
+</tr>
+<tr>
+  <td><strong>有人長住大陸、要日常共用</strong></td>
+  <td>Supabase 出局，整個選型改成<strong>香港節點自架</strong>，
+      前端與後端放同一台。成本從零變成每月約新台幣 110 元，
+      且要自己維護。這是目前唯一能同時服務兩岸的做法</td>
+</tr>
+</table>
+</div>
+</section>
+
+<section>
+<h2>4. 需求三：發票照相儲存</h2>
+
+<p><strong>這一項純前端就能做完，而且底子已經打好了。</strong></p>
+
+<h3>4.1 拍照：現成的</h3>
+<p>
+<code>js/lib/qrscan.js</code> 的 <code>capturePhoto()</code> 已經在用
+<code>&lt;input type="file" accept="image/*" capture="environment"&gt;</code> 叫出系統相機。
+當初為了掃發票 QR 而寫，直接拿來存照片即可。
+</p>
+<p class="muted">
+當初<strong>刻意不用 getUserMedia</strong> 的理由（iOS 安裝成 PWA 後權限不被記住、
+會反覆跳授權、iOS 26 有畫面轉 90 度的問題）在這裡一樣成立，維持原做法。
+</p>
+
+<h3>4.2 壓縮：一定要做</h3>
+<table>
+<tr><th></th><th>不壓縮</th><th>壓縮後</th></tr>
+<tr><td>單張大小</td><td>iPhone 原檔 2&ndash;5 MB</td><td><strong>約 250&ndash;400 KB</strong></td></tr>
+<tr><td>一年 500 張</td><td>1&ndash;2.5 GB</td><td>約 150 MB</td></tr>
+<tr><td>發票文字看不看得清</td><td>清楚</td><td>清楚（長邊 1600px 足以看清品項與金額）</td></tr>
+</table>
+<p>
+做法：<code>createImageBitmap</code> → <code>canvas</code> 縮到長邊 1600px →
+<code>toBlob('image/jpeg', 0.75)</code>。純瀏覽器 API，不需要任何函式庫。
+另存一張 200px 縮圖供清單顯示 &mdash; 明細頁一次載入幾十張原圖會很卡。
+</p>
+<p class="muted">
+不用 WebP：體積確實更小，但發票這種<strong>只會存進去、偶爾拿出來看</strong>的資料，
+相容性（舊 iOS、分享出去給別人看）比省那三成體積重要。
+</p>
+
+<h3>4.3 存哪裡</h3>
+<table>
+<tr><th></th><th>本地 IndexedDB</th><th>雲端 Storage</th></tr>
+<tr><td>要不要後端</td><td>不用</td><td>要（隨需求 2 一起）</td></tr>
+<tr><td>其他人看得到</td><td><span class="pill bad">看不到</span></td><td><span class="pill ok">看得到</span></td></tr>
+<tr><td>手機掉了</td><td><span class="pill bad">照片全沒</span></td><td><span class="pill ok">還在</span></td></tr>
+<tr><td>離線能看</td><td><span class="pill ok">能</span></td><td>能（本地留快取）</td></tr>
+</table>
+<p>
+建議<strong>兩者都做，先本地後雲端</strong>：階段 2 先做純本地版本（不必等後端，可以馬上用），
+階段 5 再把照片接上雲端，本地保留一份當快取。
+</p>
+
+<div class="note">
+<strong>iOS 的儲存空間會被回收。</strong>加到主畫面的 PWA 雖然比一般網頁安全，
+但手機空間吃緊時系統仍可能清掉網站資料，<strong>而且不會有任何警告</strong>。
+純本地存照片時要在設定頁顯示已用空間（<code>navigator.storage.estimate()</code>），
+並呼叫 <code>navigator.storage.persist()</code> 申請常駐
+（Android 會給，iOS 目前不保證）。這也是「照片最終應該上雲端」的主要理由。
+</div>
+
+<h3>4.4 與現有掃描的整合</h3>
+<p>拍一張照，同時做兩件事 &mdash; 這是這個功能最順的地方：</p>
+<ol>
+  <li>解 QR：拿到日期、總金額、品項（<strong>現有功能，已完成</strong>）</li>
+  <li>存照片：壓縮後與該筆交易關聯（<strong>新增</strong>）</li>
+</ol>
+<p>
+QR 解不出來也不要緊 &mdash; 照片照樣存下來，金額改由使用者自己填。
+這與 <code>scan.js</code> 現有的設計原則一致：<em>解不出品項不視為失敗</em>。
+手寫收據、國外的收據沒有台灣的電子發票 QR，這條路讓它們也存得進來。
+</p>
+
+<h3>4.5 備份要改</h3>
+<div class="note">
+<strong>照片不能塞進現有的 JSON 備份檔。</strong>
+轉成 base64 會膨脹三分之一，500 張照片會產出一個 200 MB 的 JSON &mdash;
+手機上光是產生這個字串就可能直接當掉。
+</div>
+<p>做法：拆成兩種匯出。</p>
+<ul>
+  <li><strong>資料備份</strong>（現有的 JSON）：維持不變，照片只存路徑與 id，<strong>不含影像</strong></li>
+  <li><strong>照片匯出</strong>（新增）：分批打包下載，或直接倚賴雲端那一份</li>
+</ul>
+<p>
+還原時若照片檔不在，要明確顯示「照片未包含在此備份中」，
+<strong>而不是顯示一個破圖</strong> &mdash; 使用者必須分得出「照片沒了」與「照片載入失敗」。
+</p>
+</section>
+
+<section>
+<h2>5. 分階段計畫</h2>
+<p>每一階段都能<strong>獨立交付、獨立驗收</strong>，中途喊停也不會留下半成品。</p>
+
+<table>
+<tr><th>階段</th><th>版本</th><th>內容</th><th>要後端</th><th>規模</th></tr>
+<tr>
+  <td><strong>1. 簡易模式</strong></td><td>v1.18.0</td>
+  <td>股票／基金收進設定開關，預設關閉；已有資料者自動維持開啟</td>
+  <td>不用</td><td>小</td>
+</tr>
+<tr>
+  <td><strong>2. 發票照片（本地）</strong></td><td>v1.19.0</td>
+  <td>拍照 → 壓縮 → 存 IndexedDB（DB v4）→ 明細顯示縮圖 → 點開放大；
+      與 QR 掃描整合；空間用量顯示；備份策略調整</td>
+  <td>不用</td><td>中</td>
+</tr>
+<tr>
+  <td><strong>3. 帳號與後端</strong></td><td>v2.0.0</td>
+  <td>Supabase 專案建立、資料表、RLS 政策、註冊／登入、
+      <code>js/lib/cloud.js</code>、同步層 <code>js/lib/sync.js</code>
+      （寄件匣 + 墓碑 + 後寫贏）</td>
+  <td><strong>要</strong></td><td><strong>大</strong></td>
+</tr>
+<tr>
+  <td><strong>4. 共用帳本</strong></td><td>v2.1.0</td>
+  <td>帳本切換、邀請碼、成員與權限、每筆顯示記帳人</td>
+  <td>要</td><td>中</td>
+</tr>
+<tr>
+  <td><strong>5. 照片上雲</strong></td><td>v2.2.0</td>
+  <td>照片同步到 Storage、離線上傳佇列、簽名網址、配額顯示</td>
+  <td>要</td><td>中</td>
+</tr>
+</table>
+
+<p>
+<strong>階段 1 與 2 可以現在就開始</strong> &mdash; 它們不依賴任何決策，做完就是可用的成果。
+階段 3 之前需要您先回答第 9 節的問題。
+</p>
+<p class="muted">
+把「帳號與後端」（階段 3）跟「共用帳本」（階段 4）分開，是因為前者是地基、後者是功能。
+地基沒鋪穩就往上蓋，出問題時會分不清是同步錯了還是權限錯了。
+階段 3 結束時的驗收目標只有一個：<strong>同一個人的兩台裝置，資料能對得起來。</strong>
+</p>
+</section>
+
+<section>
+<h2>6. 測試計畫</h2>
+<p>依專案慣例，能寫成純函式的一律純函式，用 <code>node --test</code> 跑。</p>
+<table>
+<tr><th>對象</th><th>怎麼測</th></tr>
+<tr>
+  <td><code>lib/sync.js</code> 合併邏輯</td>
+  <td>純函式單元測試。必測情境：<strong>兩邊離線各記三筆後同時上線</strong>、
+      <strong>一邊刪一邊改同一筆</strong>、<strong>同一筆在兩邊都被改</strong>、
+      <strong>時鐘不同步</strong>（手機時間慢五分鐘）</td>
+</tr>
+<tr>
+  <td>影像壓縮</td>
+  <td>尺寸上限、長寬比維持、EXIF 方向（<strong>直拍的發票不能變成橫的</strong>）、
+      <strong>壓縮後仍解得出 QR</strong></td>
+</tr>
+<tr>
+  <td>RLS 權限</td>
+  <td><strong>整合測試，不可省略。</strong>用 A 的 token 讀 B 的帳本必須得到 0 筆；
+      viewer 角色寫入必須被拒</td>
+</tr>
+<tr>
+  <td>DB v3 → v4 升級</td>
+  <td>既有資料完全不動；舊版備份（沒有 attachments 欄位）仍能還原。
+      這兩項在股票模組升 v2 時就寫過，照同一個模式補上</td>
+</tr>
+<tr>
+  <td>端對端</td>
+  <td>沿用既有的 Playwright 手法：兩個瀏覽器 context 模擬兩個人，
+      A 記一筆 → B 重新整理 → 看得到</td>
+</tr>
+</table>
+<p class="muted">
+特別提醒（來自 dev-log 2026-09-05 §10.4 的教訓）：
+改完檔案要<strong>先清 Service Worker 快取再重載</strong>，順序反了會看到舊版而以為修正沒生效。
+同步功能牽涉多台裝置，這個坑踩下去會更難察覺。
+</p>
+</section>
+
+<section>
+<h2>7. 風險</h2>
+<table>
+<tr><th>風險</th><th>影響</th><th>對策</th></tr>
+<tr>
+  <td><strong>RLS 寫錯</strong></td>
+  <td>別人的帳目被讀到，而且平常完全看不出來</td>
+  <td>越權測試列為必要驗收項目；政策先寫「全部拒絕」再逐條開放</td>
+</tr>
+<tr>
+  <td>同步造成資料重複或消失</td>
+  <td>比沒有同步更糟 &mdash; 使用者會不再信任整個 App</td>
+  <td>墓碑 + 逐筆後寫贏；上線前先跑一段<strong>只讀不寫</strong>的影子同步，比對兩邊差異</td>
+</tr>
+<tr>
+  <td>免費專案閒置會被暫停</td>
+  <td>久沒用之後打開，同步失敗</td>
+  <td>每天有人記帳就不會觸發。更重要的是：
+      <strong>同步失敗時 App 必須照常能用</strong>，
+      只在角落提示「尚未同步」，絕不可擋住記帳</td>
+</tr>
+<tr>
+  <td>免費額度用完</td>
+  <td>主要是照片佔的儲存空間</td>
+  <td>設定頁顯示用量，接近上限時提示。文字資料量極小，不會是瓶頸</td>
+</tr>
+<tr>
+  <td>iOS 清掉本地照片</td>
+  <td>階段 2（純本地）時照片可能無聲消失</td>
+  <td><code>storage.persist()</code> ＋ 用量顯示 ＋ 說明；階段 5 上雲後根本解決</td>
+</tr>
+<tr>
+  <td>隱私原則改變</td>
+  <td>專案的核心宣稱不再成立</td>
+  <td>單機模式維持預設；同步為主動開啟；README 誠實改寫</td>
+</tr>
+</table>
+</section>
+
+<section>
+<h2>8. 費用：免費額度到底夠不夠</h2>
+<p>Supabase 免費方案的額度（2026-09-08 查證），對照一個家庭 3&ndash;5 人的實際用量：</p>
+<table>
+<tr><th>項目</th><th>免費額度</th><th>家庭一年用量</th><th>會不會用完</th></tr>
+<tr>
+  <td>資料庫容量</td><td>500 MB</td>
+  <td>一筆交易約 200 bytes，一年一萬筆 <strong>≈ 2 MB</strong></td>
+  <td><span class="pill ok">不可能</span><br><span class="muted">夠用兩百年以上</span></td>
+</tr>
+<tr>
+  <td><strong>檔案儲存</strong></td><td><strong>1 GB</strong></td>
+  <td>照片壓縮後約 300 KB／張 → <strong>約 3,300 張</strong></td>
+  <td><span class="pill bad">唯一會滿的</span><br><span class="muted">每月 40 張約可用六至七年</span></td>
+</tr>
+<tr>
+  <td>月流量</td><td>5 GB</td>
+  <td>每人每天同步幾十 KB，一個月幾 MB</td>
+  <td><span class="pill ok">不可能</span></td>
+</tr>
+<tr>
+  <td>月活躍用戶</td><td>50,000</td><td>3&ndash;5 人</td>
+  <td><span class="pill ok">不可能</span></td>
+</tr>
+<tr>
+  <td>專案數</td><td>2 個</td><td>1 個</td>
+  <td><span class="pill ok">不會</span></td>
+</tr>
+</table>
+<p>
+所以第 7 節說的「免費額度用完」<strong>實際上只有一件事：發票照片存滿 1 GB</strong>，
+其他四項的差距是好幾個數量級，不必擔心。
+</p>
+<p>
+而且用完不是資料消失，是<strong>新照片傳不上去</strong>。對策：
+設定頁顯示已用比例，接近上限時提示，並提供「匯出舊照片後刪除」。
+升級付費方案是每月 25 美元 &mdash; 對家庭記帳並不划算，刪舊照片實際得多。
+</p>
+
+<h3>8.1 另一個要注意的限制：閒置一週會暫停</h3>
+<p>
+免費專案<strong>閒置一週會被暫停</strong>，暫停後要到後台手動恢復。
+每天有人記帳就不會觸發，但這也再次說明第 7 節那條對策為什麼重要：
+<strong>同步失敗時 App 必須照常能用</strong>。
+</p>
+<p class="muted">
+額度數字為 2026-09-08 查證，日後可能調整。
+規劃時<strong>不把免費額度當成保證</strong> &mdash;
+所以設定頁要顯示用量，讓使用者自己看得到，而不是某天突然寫不進去。
+</p>
+</section>
+
+<section>
+<h2>9. 需要您先拍板</h2>
+<ol>
+  <li>
+    <strong>接受「共用帳本的資料會存到雲端」嗎？</strong><br>
+    <span class="muted">這是需求 2 無法迴避的代價。若不接受，多人共用就只能停在
+    「手動互傳備份檔」的程度 &mdash; 我不建議，那個做法漏一次就對不起來。</span>
+  </li>
+  <li>
+    <strong>後端用 Supabase 可以嗎？</strong><br>
+    <span class="muted">建議它的理由是「不必引入任何 SDK，前端維持純靜態」。
+    備案是 Cloudflare（免費額度較好、不會被暫停，但 API 要自己寫自己維護）。</span>
+  </li>
+  <li>
+    <strong>股票與基金要「收起來」還是「刪掉」？</strong><br>
+    <span class="muted">建議收起來（第 2 節）。反正沒開就不會載入，留著不影響效能。</span>
+  </li>
+  <li>
+    <strong>需要涵蓋中國大陸嗎？是「偶爾出差」還是「有人長住」？</strong><br>
+    <span class="muted">這一題會直接推翻第 2 題的答案 &mdash; Supabase 在大陸被封鎖（見 3.9 節）。
+    偶爾出差不必改架構（離線照樣記帳）；有人長住則要改成香港節點自架，
+    工作量與長期維運責任都大幅增加。</span>
+  </li>
+  <li>
+    <strong>要先做哪一段？</strong><br>
+    <span class="muted">建議 <strong>階段 1 → 2</strong> 先走，這兩段不需要任何後端，
+    做完您馬上就有「清爽的記帳 ＋ 發票存照片」可以用。
+    多人共用（階段 3&ndash;5）是另一個量級的工程，值得單獨開始。</span>
+  </li>
+</ol>
+</section>
+
+<section>
+<h2>10. 順帶發現</h2>
+<p>
+<code>package.json</code> 的 <code>version</code> 還停在 <code>1.13.1</code>，
+而 <code>js/app.js</code> 與 <code>sw.js</code> 都已經是 <code>1.17.0</code>。
+看來 <code>tools/bump_version.py</code> 沒有一併更新 <code>package.json</code>。
+不影響執行（專案沒有建置流程），但版本號對不起來日後查問題會困擾，建議順手修掉。
+</p>
+</section>
+
+</div>
+</body>
+</html>

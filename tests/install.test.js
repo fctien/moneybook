@@ -9,7 +9,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { detectPlatform, isIOSNonSafari, installGuide } from '../js/lib/install.js';
+import {
+  detectPlatform, isIOSNonSafari, installGuide,
+  createInstallPromptController, shouldShowInstallBanner, BANNER_SNOOZE_DAYS,
+} from '../js/lib/install.js';
 
 // 真實的 User-Agent 字串
 const UA = {
@@ -99,4 +102,99 @@ test('每個平台的步驟都不是空字串', () => {
     assert.ok(g.steps.every((s) => s.trim().length > 0), `${p} 有空步驟`);
     assert.ok(g.warnings.every((w) => w.trim().length > 0), `${p} 有空警告`);
   }
+});
+
+// ── 提示列顯示條件 ─────────────────────────────────────────
+
+const DAY = 86_400_000;
+
+test('已經是獨立 App 就不顯示提示列', () => {
+  assert.equal(shouldShowInstallBanner({ standalone: true, platform: 'ios', dismissedAt: null, now: 0 }), false);
+});
+
+test('電腦不顯示提示列，安裝與否不影響資料安全', () => {
+  assert.equal(shouldShowInstallBanner({ standalone: false, platform: 'desktop', dismissedAt: null, now: 0 }), false);
+});
+
+test('手機上沒關過就顯示', () => {
+  assert.equal(shouldShowInstallBanner({ standalone: false, platform: 'ios', dismissedAt: null, now: 0 }), true);
+  assert.equal(shouldShowInstallBanner({ standalone: false, platform: 'android', dismissedAt: null, now: 0 }), true);
+});
+
+test('關掉後兩週內不再出現，兩週後再提醒', () => {
+  const closed = 1_000_000;
+  const within = closed + (BANNER_SNOOZE_DAYS - 1) * DAY;
+  const after = closed + BANNER_SNOOZE_DAYS * DAY;
+  assert.equal(shouldShowInstallBanner({ standalone: false, platform: 'ios', dismissedAt: closed, now: within }), false);
+  assert.equal(shouldShowInstallBanner({ standalone: false, platform: 'ios', dismissedAt: closed, now: after }), true);
+});
+
+// ── 一鍵安裝控制器 ─────────────────────────────────────────
+
+/** 假的事件目標與假的 beforeinstallprompt 事件 */
+function fakeTarget() {
+  const handlers = {};
+  return {
+    addEventListener: (type, fn) => { handlers[type] = fn; },
+    fire: (type, ev = {}) => handlers[type]?.(ev),
+  };
+}
+
+function fakePromptEvent(outcome) {
+  return {
+    prevented: false,
+    prompted: 0,
+    preventDefault() { this.prevented = true; },
+    async prompt() { this.prompted += 1; },
+    userChoice: Promise.resolve({ outcome }),
+  };
+}
+
+test('沒收到事件時不能安裝，prompt 回 unavailable', async () => {
+  const c = createInstallPromptController(fakeTarget(), undefined);
+  assert.equal(c.available(), false);
+  assert.equal(await c.prompt(), 'unavailable');
+});
+
+test('收到 beforeinstallprompt 後攔下預設提示並可安裝', async () => {
+  const t = fakeTarget();
+  const c = createInstallPromptController(t, undefined);
+  const ev = fakePromptEvent('accepted');
+
+  t.fire('beforeinstallprompt', ev);
+  assert.equal(ev.prevented, true, '要擋掉瀏覽器自己的迷你提示列');
+  assert.equal(c.available(), true);
+
+  assert.equal(await c.prompt(), 'accepted');
+  assert.equal(ev.prompted, 1);
+  assert.equal(c.available(), false, '同一個事件只能 prompt 一次');
+});
+
+test('使用者按取消時事件留著，按鈕還能再用', async () => {
+  const t = fakeTarget();
+  const c = createInstallPromptController(t, undefined);
+  t.fire('beforeinstallprompt', fakePromptEvent('dismissed'));
+
+  assert.equal(await c.prompt(), 'dismissed');
+  assert.equal(c.available(), true);
+});
+
+test('模組載入前攔到的事件會被接手', () => {
+  const stash = { event: fakePromptEvent('accepted') };
+  const c = createInstallPromptController(fakeTarget(), stash);
+  assert.equal(c.available(), true);
+});
+
+test('appinstalled 之後清掉事件並標記已安裝', () => {
+  const t = fakeTarget();
+  const c = createInstallPromptController(t, undefined);
+  let notified = 0;
+  c.onChange(() => { notified += 1; });
+
+  t.fire('beforeinstallprompt', fakePromptEvent('accepted'));
+  t.fire('appinstalled');
+
+  assert.equal(c.available(), false);
+  assert.equal(c.justInstalled(), true);
+  assert.equal(notified, 2);
 });
