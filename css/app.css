@@ -194,7 +194,10 @@ button { cursor: pointer; }
   display: flex;
   background: var(--c-surface);
   border-top: 1px solid var(--c-border);
-  padding-bottom: var(--safe-bottom);
+  /* 下內距少 20px，整條分頁列的內容就往下移 20px ——
+     它是底部錨定的，高度變矮時上緣會往下走。
+     max() 是給沒有 safe area 的裝置用的，避免算出負值。 */
+  padding-bottom: max(0px, calc(var(--safe-bottom) - 20px));
   flex-shrink: 0;
 }
 
@@ -242,7 +245,8 @@ button { cursor: pointer; }
   flex-shrink: 0;
   background: var(--c-surface);
   border-top: 1px solid var(--c-border);
-  padding: 8px 8px calc(8px + var(--safe-bottom));
+  /* 同分頁列：下內距少 20px，數字鍵盤與「完成」整塊往下移 20px */
+  padding: 8px 8px max(0px, calc(8px + var(--safe-bottom) - 20px));
 }
 
 .segment {
