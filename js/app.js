@@ -14,7 +14,7 @@ import {
   isStandalone, detectPlatform, createInstallPromptController, shouldShowInstallBanner,
 } from './lib/install.js';
 
-export const APP_VERSION = '1.21.3';
+export const APP_VERSION = '1.22.0';
 
 const TABS = [
   { id: 'entry', label: '記帳', icon: '✏️' },
