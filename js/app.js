@@ -14,7 +14,7 @@ import {
   isStandalone, detectPlatform, createInstallPromptController, shouldShowInstallBanner,
 } from './lib/install.js';
 
-export const APP_VERSION = '1.20.1';
+export const APP_VERSION = '1.21.0';
 
 const TABS = [
   { id: 'entry', label: '記帳', icon: '✏️' },
@@ -46,7 +46,7 @@ async function main() {
   }
 
   loading?.remove();
-  store.applySafeTopOverride();
+  store.applySafeAreaOverrides();
 
   views.entry = createEntryView({ onSaved: () => { /* 留在記帳頁，方便連續記帳 */ } });
   views.ledger = createLedgerView({

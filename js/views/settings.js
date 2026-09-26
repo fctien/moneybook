@@ -177,6 +177,7 @@ export function createSettingsView({ appVersion = '1.0.0', installer = null, ope
         ['safe-area 上（實際套用）', cs.getPropertyValue('--safe-top').trim() || '0px'],
         ['safe-area 上（系統回報）', getComputedStyle(document.body).getPropertyValue('padding-top') === '' ? '—' : (globalThis.CSS?.supports?.('top: env(safe-area-inset-top)') ? '支援 env()' : '不支援 env()')],
         ['上方內距已手動歸零', store.safeTopOverridden() ? '是' : '否'],
+        ['下方內距已手動歸零', store.safeBottomOverridden() ? '是' : '否'],
         ['safe-area 下', cs.getPropertyValue('--safe-bottom').trim() || '0px'],
         ['App 高度', appBox ? `${Math.round(appBox.height)}` : '—'],
         ['App 底部座標', appBox ? `${Math.round(appBox.bottom)}` : '—'],
@@ -247,6 +248,22 @@ export function createSettingsView({ appVersion = '1.0.0', installer = null, ope
               );
             },
           }, [store.safeTopOverridden() ? '↩ 復原上方內距' : '試：取消上方內距']),
+          // 視口若沒延伸到螢幕底部，home indicator 就不在視口裡，
+          // 分頁列還照著 safe-area 墊一塊就是白白吃掉空間。
+          el('button.btn.btn--ghost', {
+            type: 'button',
+            onClick: async (e) => {
+              const next = !store.safeBottomOverridden();
+              await store.setSafeBottomOverride(next);
+              e.target.textContent = next ? '↩ 復原下方內距' : '試：取消下方內距';
+              toast(
+                next
+                  ? '已取消下方內距。分頁列會往下貼齊，看看是不是更合理。'
+                  : '已復原。',
+                'info', 5000,
+              );
+            },
+          }, [store.safeBottomOverridden() ? '↩ 復原下方內距' : '試：取消下方內距']),
           // 把 App 的邊界畫出來，截一張圖就知道缺口在哪一邊
           el('button.btn.btn--ghost', {
             type: 'button',
