@@ -23,16 +23,17 @@
   --shadow: 0 1px 3px rgba(16, 24, 40, 0.08), 0 1px 2px rgba(16, 24, 40, 0.04);
 
   /*
-   * 上緣不墊 safe-area。
+   * 上緣要墊 safe-area。
    *
-   * index.html 的 apple-mobile-web-app-status-bar-style 是 default，
-   * iOS 已經把網頁視窗排在狀態列底下了 —— 狀態列那塊根本不在視窗範圍內。
-   * 這時再用 env(safe-area-inset-top) 墊一次，就是把內容白白往下推一截，
-   * 實測會擋住上方的內容。
+   * v1.26.1 曾經把它歸零，因為 status-bar-style 已改成 default、
+   * 照規格 iOS 應該把視窗排在狀態列底下。但實機截圖顯示不是這樣：
+   * 狀態列（時間、訊號、電量）直接蓋在「支出／收入／轉帳」上面 ——
+   * 網頁仍然是畫到狀態列底下的（iOS 沿用了捷徑建立當時記下的設定）。
    *
-   * 下緣的 --safe-bottom 保留：home indicator 確實在視窗裡面，要閃開。
+   * 所以這裡必須墊回來，否則最上面那一排按鈕會被狀態列蓋住。
+   * 規格怎麼寫不重要，實機長什麼樣才算數。
    */
-  --safe-top: 0px;
+  --safe-top: env(safe-area-inset-top, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   --tabbar-h: 58px;
 
