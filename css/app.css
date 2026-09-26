@@ -25,9 +25,6 @@
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   --tabbar-h: 58px;
-  /* 底部往下延伸的量。實際值由 app.js 依「底下到底空著多少」算出來後覆寫，
-     不會超過視窗，所以不會把分頁列文字切掉。 */
-  --bottom-shift: 0px;
 
   color-scheme: light dark;
 }
@@ -60,7 +57,6 @@ html, body {
   overscroll-behavior-y: none; /* 擋掉 iOS 整頁橡皮筋回彈，避免看起來像壞掉 */
 }
 
-
 body {
   background: var(--c-bg);
   color: var(--c-text);
@@ -72,16 +68,6 @@ body {
 }
 
 body.is-locked { overflow: hidden; }
-
-/*
- * `.install-banner` 的 class 寫了 display: flex，會蓋過瀏覽器內建的
- * [hidden]{display:none}（作者樣式永遠贏過 UA 樣式）。於是 node.hidden = true
- * 之後元素還在，留下 10 + 10 + 1 = 21px 的空帶，夾在「完成」與分頁列之間。
- *
- * 歷程：v1.18.2 修掉 → v1.22.1 依使用者要求還原（要回到 9:21 之前的位置）
- * → 使用者指出那就是中間的 gap，再次修掉。
- */
-[hidden] { display: none !important; }
 
 button, input, textarea, select {
   font: inherit;
@@ -97,10 +83,6 @@ button { cursor: pointer; }
   flex-direction: column;
   height: 100vh;
   height: 100dvh; /* 手機網址列收合時 100vh 會算錯，dvh 才是實際可視高度 */
-  /* 有些裝置上 100dvh 算出來比視窗矮，底下就空一塊。
-     把 App 往下補足那一塊，分頁列與數字鍵盤會整個跟著下移，
-     而且是「長高」不是「位移」—— 裡面的東西不會被裁掉。 */
-  height: calc(100dvh + var(--bottom-shift));
 }
 
 .app__main {
@@ -906,27 +888,6 @@ button { cursor: pointer; }
 }
 .detail-list dt { color: var(--c-text-muted); }
 .detail-list dd { margin: 0; text-align: right; word-break: break-all; }
-
-/* 版面診斷：把 App 的邊界畫出來。
-   紅框以外就是 App 碰不到的區域，截一張圖立刻看得出空白在上面還是下面。 */
-.app.is-outlined { outline: 3px solid #e11d48; outline-offset: -3px; }
-.app.is-outlined .tabbar { box-shadow: inset 0 3px 0 #0ea5e9; }
-
-/* 版面診斷的純文字備援，要可以長按選取 */
-.diag-text {
-  margin: 10px 0;
-  padding: 10px 12px;
-  background: var(--c-surface-2);
-  border: 1px solid var(--c-border);
-  border-radius: var(--radius-sm);
-  font-family: ui-monospace, "SF Mono", Menlo, monospace;
-  font-size: 11px;
-  line-height: 1.55;
-  white-space: pre-wrap;
-  word-break: break-all;
-  user-select: text;
-  -webkit-user-select: text;
-}
 
 /* ------------------------------------------------------------------ 提示訊息 */
 

@@ -189,9 +189,8 @@ export function createSettingsView({ appVersion = '1.0.0', installer = null, ope
         ['App 底部剩餘空白', appBox ? `${Math.round(innerHeight - appBox.bottom)}` : '—'],
         // 不是 0 就代表視口本身比螢幕小 —— 那不是 CSS 能解決的
         ['視口比螢幕短', `${screen.height - innerHeight}`],
-        // App 下方本來空著多少、實際補了多少
-        ['App 下方空隙', `${globalThis.__bottomShift?.gap ?? '—'}`],
-        ['已往下補足', `${globalThis.__bottomShift?.shift ?? '—'}`],
+        // .app 的下緣距離視窗底部還有多少。不是 0 就代表 App 沒填滿視窗。
+        ['App 下緣到視窗底部', `${Math.round(innerHeight - (appBox?.bottom ?? innerHeight))}`],
         // 「更新完是滿版、用一陣子就跑版」要靠這三項才證實得了
         ['視窗高｜啟動以來最大', vlog.max ? `${vlog.max}（${vlog.maxAt}）` : '—'],
         ['視窗高｜啟動以來最小', vlog.min ? `${vlog.min}（${vlog.minAt}・${vlog.minWhy ?? ''}）` : '—'],
