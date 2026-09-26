@@ -99,9 +99,11 @@ button { cursor: pointer; }
 
 .view { display: block; }
 
-/* 除了記帳頁以外都是一般捲動內容 */
+/* 除了記帳頁以外都是一般捲動內容。
+   底部不加 --safe-bottom：這些內容在 .app__main 裡，而 .app__main 下面就是分頁列，
+   分頁列自己已經把 home indicator 那塊墊掉了。兩邊都墊就會多留一次。 */
 .view--ledger, .view--assets, .view--report, .view--settings {
-  padding: 12px 14px calc(20px + var(--safe-bottom));
+  padding: 12px 14px 20px;
 }
 
 .boot {
@@ -231,7 +233,8 @@ button { cursor: pointer; }
   flex-shrink: 0;
   background: var(--c-surface);
   border-top: 1px solid var(--c-border);
-  padding: 8px 8px calc(8px + var(--safe-bottom));
+  /* 同上：分頁列已經墊過 safe area，這裡再墊一次就是重複 */
+  padding: 8px 8px;
 }
 
 .segment {
