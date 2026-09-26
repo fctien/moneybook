@@ -62,6 +62,9 @@ export function createSettingsView({ appVersion = '1.0.0', installer = null, ope
       el('section.card', {}, [
         el('h2.card__title', { text: '關於' }),
         el('p.about-text', { text: `MoneyBook v${appVersion}` }),
+        el('div.row-list', {}, [
+          rowButton('📐', '版面診斷', openLayoutDiagnostics),
+        ]),
         el('p.about-text.about-text--muted', {
           text: '完全離線運作的個人記帳工具。所有資料只存在這台裝置的瀏覽器中，不會上傳到任何伺服器。',
         }),
@@ -113,6 +116,63 @@ export function createSettingsView({ appVersion = '1.0.0', installer = null, ope
       meta ? el('span.row__meta', { text: meta }) : null,
       el('span.row__chevron', { text: '›' }),
     ]);
+  }
+
+  /**
+   * 版面診斷。
+   *
+   * 「畫面沒展開、底下一塊空白」這類問題在電腦上重現不了 ——
+   * 螢幕尺寸、safe area、是不是獨立 App、瀏覽器工具列高度都只有當下那台裝置知道。
+   * 把這些數字直接秀出來並可複製，使用者回報時就不必用文字描述畫面。
+   */
+  function openLayoutDiagnostics() {
+    openSheet('版面診斷', (body) => {
+      const cs = getComputedStyle(document.documentElement);
+      const appBox = document.querySelector('.app')?.getBoundingClientRect();
+      const tabBox = document.querySelector('.tabbar')?.getBoundingClientRect();
+      const vv = globalThis.visualViewport;
+
+      const rows = [
+        ['版本', `v${appVersion}`],
+        ['獨立 App（已加到主畫面）', isStandalone() ? '是' : '否'],
+        ['視窗 innerHeight', `${innerHeight}`],
+        ['visualViewport 高', vv ? `${Math.round(vv.height)}` : '不支援'],
+        ['螢幕 screen.height', `${screen.height}`],
+        ['裝置像素比', `${devicePixelRatio}`],
+        ['safe-area 上', cs.getPropertyValue('--safe-top').trim() || '0px'],
+        ['safe-area 下', cs.getPropertyValue('--safe-bottom').trim() || '0px'],
+        ['App 高度', appBox ? `${Math.round(appBox.height)}` : '—'],
+        ['App 底部座標', appBox ? `${Math.round(appBox.bottom)}` : '—'],
+        ['分頁列底部座標', tabBox ? `${Math.round(tabBox.bottom)}` : '—'],
+        // 這一行是重點：不是 0 就代表 App 沒有填滿畫面，底下露出的是背景色
+        ['畫面底部剩餘空白', appBox ? `${Math.round(innerHeight - appBox.bottom)}` : '—'],
+      ];
+
+      body.append(
+        el('p.sheet__message', {
+          text: '這些是這台裝置回報的實際數字。若版面看起來不對，把這一頁的內容複製給我。',
+        }),
+        el('dl.detail-list', {}, rows.flatMap(([k, v]) => [
+          el('dt', { text: k }),
+          el('dd', { text: v }),
+        ])),
+      );
+
+      const text = [
+        ...rows.map(([k, v]) => `${k}: ${v}`),
+        `UA: ${navigator.userAgent}`,
+      ].join(String.fromCharCode(10));
+
+      body.append(el('div.sheet__actions', {}, [
+        el('button.btn.btn--primary', {
+          type: 'button',
+          onClick: async () => {
+            const ok = await copyToClipboard(text);
+            toast(ok ? '已複製，可直接貼上回報' : '複製失敗，請手動抄寫', ok ? 'success' : 'error');
+          },
+        }, ['複製診斷資訊']),
+      ]));
+    });
   }
 
   // ------------------------------------------------------------- 股價自動更新
