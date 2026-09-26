@@ -297,3 +297,54 @@ backdrop 已經是 `fixed; inset: 0`、高度是確定的，改用百分比才�
 - 使用者需更新到 v1.18.4；若畫面仍未更新，需完全關閉 App 再開
   （Service Worker 會提示「已下載新版本，下次開啟時生效」）
 
+---
+
+## 2026-09-26 裝置回報的數字與後續診斷（v1.18.5）
+
+**使用者回報的實測值（iPhone、iOS 18.7／Safari 26.5.2、DPR 3、已加到主畫面）**
+
+```
+視窗 innerHeight: 812      螢幕 screen.height: 874
+safe-area 上: 62px         safe-area 下: 34px
+App 高度: 812              App 底部座標: 812
+畫面底部剩餘空白: 0
+```
+
+**讀出來的兩件事**
+
+1. **App 本身沒問題**：高度 812＝innerHeight 812，底部剩餘 0。
+   v1.18.3 把 `.app` 改成 `position: fixed; inset: 0` 之後，
+   App 已經完整填滿網頁視口。
+
+2. **視口本身比螢幕短 62px**：874 − 812 = 62，而且**剛好等於 safe-area 上緣**。
+   這不是 CSS 能解決的 —— 是 iOS 給的視口就只有那麼大。
+
+**還無法判定的關鍵**
+缺的那 62px 在**上面**還是**下面**，兩種情況的修法完全相反：
+
+| 情況 | 現象 | 修法 |
+|---|---|---|
+| 視口從螢幕 y=0 開始（有畫到狀態列底下） | 缺的在螢幕下方 | 視口高度問題，CSS 無解，要從 manifest／安裝方式下手 |
+| 視口從 y=62 開始（iOS 把它往下推） | 缺的在上方 | `padding-top: var(--safe-top)` 是重複墊的，要拿掉 |
+
+`index.html` 的 meta 全部正確（`apple-mobile-web-app-status-bar-style: black-translucent`、
+`viewport-fit=cover`、manifest `display: standalone`），照規格應該是第一種，
+但實測數字不符合，所以不能用推論下結論。
+
+**做法**
+診斷畫面補上判定用的欄位與工具：
+
+- `innerWidth × innerHeight`、`screen 寬×高`、`availHeight`、`outerHeight`、
+  `documentElement.clientHeight`
+- **`視口在螢幕上的起點 screenY`** —— 決定性的一項，0 或 62 直接分辨上述兩種情況
+- `視口比螢幕短` —— 一眼看出視口與螢幕的差距
+- **「標示 App 邊界（截圖用）」**：給 `.app` 加紅色外框、分頁列頂端加藍線。
+  數字說得出「短了 62px」，說不出「短在哪一邊」；截一張圖，紅框外面就是答案。
+
+**驗證**
+402×812 模擬環境下所有新欄位正常輸出，外框與藍線正確繪製（實測截圖確認）。
+291 項測試通過。
+
+**待辦**
+- 等使用者回報 `screenY` 與標示邊界的截圖，再決定修法
+

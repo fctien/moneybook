@@ -135,17 +135,26 @@ export function createSettingsView({ appVersion = '1.0.0', installer = null, ope
       const rows = [
         ['版本', `v${appVersion}`],
         ['獨立 App（已加到主畫面）', isStandalone() ? '是' : '否'],
-        ['視窗 innerHeight', `${innerHeight}`],
+        ['視窗 innerWidth × innerHeight', `${innerWidth} × ${innerHeight}`],
         ['visualViewport 高', vv ? `${Math.round(vv.height)}` : '不支援'],
-        ['螢幕 screen.height', `${screen.height}`],
+        ['螢幕 screen 寬×高', `${screen.width} × ${screen.height}`],
+        ['screen.availHeight', `${screen.availHeight}`],
+        ['outerHeight', `${outerHeight}`],
+        ['documentElement.clientHeight', `${document.documentElement.clientHeight}`],
+        // 決定性的一項：網頁視口在螢幕上的起點。
+        // 0 代表 App 有畫到狀態列底下（缺的那塊在螢幕下方）；
+        // 不是 0 代表 iOS 把視口往下推了（缺的那塊在上方）。修法完全相反。
+        ['視口在螢幕上的起點 screenY', `${globalThis.screenY ?? globalThis.screenTop ?? '不支援'}`],
         ['裝置像素比', `${devicePixelRatio}`],
         ['safe-area 上', cs.getPropertyValue('--safe-top').trim() || '0px'],
         ['safe-area 下', cs.getPropertyValue('--safe-bottom').trim() || '0px'],
         ['App 高度', appBox ? `${Math.round(appBox.height)}` : '—'],
         ['App 底部座標', appBox ? `${Math.round(appBox.bottom)}` : '—'],
         ['分頁列底部座標', tabBox ? `${Math.round(tabBox.bottom)}` : '—'],
-        // 這一行是重點：不是 0 就代表 App 沒有填滿畫面，底下露出的是背景色
-        ['畫面底部剩餘空白', appBox ? `${Math.round(innerHeight - appBox.bottom)}` : '—'],
+        // 不是 0 就代表 App 沒有填滿視口
+        ['App 底部剩餘空白', appBox ? `${Math.round(innerHeight - appBox.bottom)}` : '—'],
+        // 不是 0 就代表視口本身比螢幕小 —— 那不是 CSS 能解決的
+        ['視口比螢幕短', `${screen.height - innerHeight}`],
       ];
 
       const text = [
@@ -159,7 +168,7 @@ export function createSettingsView({ appVersion = '1.0.0', installer = null, ope
         }),
         // 按鈕放最上面：這張表有十幾列，擺在最後的話在小螢幕上要捲很久才看得到，
         // 使用者會以為根本沒有這顆按鈕
-        el('div.sheet__actions', {}, [
+        el('div.sheet__actions.sheet__actions--stack', {}, [
           el('button.btn.btn--primary', {
             type: 'button',
             onClick: async (e) => {
@@ -168,6 +177,15 @@ export function createSettingsView({ appVersion = '1.0.0', installer = null, ope
               if (ok) e.target.textContent = '✓ 已複製';
             },
           }, ['複製診斷資訊']),
+          // 數字說得出「視口比螢幕短」，但說不出短的那塊在上面還是下面。
+          // 把 App 的邊界畫出來，截一張圖就知道了 —— 紅框外面就是 App 碰不到的地方。
+          el('button.btn.btn--ghost', {
+            type: 'button',
+            onClick: () => {
+              document.querySelector('.app')?.classList.toggle('is-outlined');
+              toast('已標示 App 邊界，請關掉這頁截一張圖給我。再按一次可取消。', 'info', 6000);
+            },
+          }, ['標示 App 邊界（截圖用）']),
         ]),
         // 剪貼簿 API 在 iOS 某些情境會被擋掉，留一塊可以長按選取的純文字當備援
         el('pre.diag-text', { text }),

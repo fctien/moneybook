@@ -918,6 +918,11 @@ button { cursor: pointer; }
 .detail-list dt { color: var(--c-text-muted); }
 .detail-list dd { margin: 0; text-align: right; word-break: break-all; }
 
+/* 版面診斷：把 App 的邊界畫出來。
+   紅框以外就是 App 碰不到的區域，截一張圖立刻看得出空白在上面還是下面。 */
+.app.is-outlined { outline: 3px solid #e11d48; outline-offset: -3px; }
+.app.is-outlined .tabbar { box-shadow: inset 0 3px 0 #0ea5e9; }
+
 /* 版面診斷的純文字備援，要可以長按選取 */
 .diag-text {
   margin: 10px 0;
