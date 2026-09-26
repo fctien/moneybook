@@ -99,7 +99,9 @@ button { cursor: pointer; }
   flex: 1;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
-  padding-top: var(--safe-top);
+  /* 安全區在這個配置下是 0，但內容不該直接貼著視窗最上緣。
+     用 em 而不是 px：使用者把字體調大時，這段留白要跟著變大才不會顯得擠。 */
+  padding-top: calc(var(--safe-top) + 0.7em);
 }
 
 .view { display: block; }
@@ -143,11 +145,13 @@ button { cursor: pointer; }
   align-items: center;
   justify-content: center;
   gap: 2px;
-  height: var(--tabbar-h);
+  /* 固定 height 會在使用者把字體調大時把文字裁掉。
+     改成最小高度：字大就讓整條分頁列長高，寧可少一點內容區也不要看不到字。 */
+  min-height: var(--tabbar-h);
   border: 0;
   background: none;
   color: var(--c-text-muted);
-  padding: 0;
+  padding: 6px 2px;
 }
 
 .tabbar__item.is-active { color: var(--c-accent); }
@@ -163,7 +167,8 @@ button { cursor: pointer; }
 }
 
 .entry-top {
-  padding: 10px 14px 6px;
+  /* 用 em：字體放大時這塊要跟著變寬鬆，否則金額與分段列會黏在一起 */
+  padding: 0.8em 14px 0.5em;
   background: var(--c-surface);
   border-bottom: 1px solid var(--c-border);
   flex-shrink: 0;
@@ -392,8 +397,8 @@ button { cursor: pointer; }
   border: 1px solid transparent;
   background: none;
   border-radius: 50%;
-  width: 38px;
-  height: 38px;
+  min-width: 38px;
+  min-height: 38px;
   font-size: 20px;
   color: var(--c-text-muted);
   display: inline-flex;
@@ -474,8 +479,9 @@ button { cursor: pointer; }
 .tx-row:active { background: var(--c-surface-2); }
 
 .tx-row__icon {
-  width: 36px;
-  height: 36px;
+  width: 2.4em;
+  height: 2.4em;
+  flex: none;
   border-radius: 50%;
   background: var(--c-surface-2);
   display: inline-flex;
@@ -711,8 +717,10 @@ button { cursor: pointer; }
 .row.is-add .row__label { color: var(--c-accent); }
 
 .row__icon {
-  width: 30px;
-  height: 30px;
+  /* 2em 在預設 15px 下正好是 30px，字體放大時跟著長，emoji 才不會被裁 */
+  width: 2em;
+  height: 2em;
+  flex: none;
   border-radius: 8px;
   display: inline-flex;
   align-items: center;
