@@ -14,7 +14,7 @@ import {
   isStandalone, detectPlatform, createInstallPromptController, shouldShowInstallBanner,
 } from './lib/install.js';
 
-export const APP_VERSION = '1.23.0';
+export const APP_VERSION = '1.23.2';
 
 const TABS = [
   { id: 'entry', label: '記帳', icon: '✏️' },
@@ -80,6 +80,49 @@ async function main() {
   startAutoQuoteUpdates();
   keepWindowPinned();
   watchViewportHeight();
+  applyBottomShift();
+}
+
+/**
+ * 把 App 往下補足到視窗底部。
+ *
+ * 在某些 iPhone 上 `100dvh` 算出來比 `innerHeight` 矮，App 下方就空一塊，
+ * 看起來像分頁列浮在半空中。這裡量出實際差多少，再把 App 長高那麼多。
+ *
+ * 兩個刻意的限制：
+ * - 只補到視窗底部為止（`MAX_BOTTOM_SHIFT` 是上限），補過頭會把分頁列的
+ *   文字推出畫面，那比空一塊更糟
+ * - 是讓 App「長高」而不是把分頁列「往下位移」：長高會讓上面的捲動區
+ *   跟著變大，裡面的東西不會被裁掉
+ */
+const MAX_BOTTOM_SHIFT = 80;
+
+function applyBottomShift() {
+  const root = document.documentElement;
+  const app = document.querySelector('.app');
+  if (!app) return;
+
+  const measure = () => {
+    // 先歸零才量得到真正的差距，否則量到的是上一次補過的結果
+    root.style.setProperty('--bottom-shift', '0px');
+    const gap = Math.round(globalThis.innerHeight - app.getBoundingClientRect().bottom);
+    const shift = Math.max(0, Math.min(MAX_BOTTOM_SHIFT, gap));
+    root.style.setProperty('--bottom-shift', `${shift}px`);
+    return { gap, shift };
+  };
+
+  const run = () => {
+    const r = measure();
+    // 供版面診斷顯示，不另外存檔
+    globalThis.__bottomShift = r;
+  };
+
+  run();
+  globalThis.addEventListener('resize', run);
+  globalThis.addEventListener('orientationchange', () => setTimeout(run, 300));
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') setTimeout(run, 300);
+  });
 }
 
 /**

@@ -25,6 +25,9 @@
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   --tabbar-h: 58px;
+  /* 底部往下延伸的量。實際值由 app.js 依「底下到底空著多少」算出來後覆寫，
+     不會超過視窗，所以不會把分頁列文字切掉。 */
+  --bottom-shift: 0px;
 
   color-scheme: light dark;
 }
@@ -99,6 +102,10 @@ button { cursor: pointer; }
   flex-direction: column;
   height: 100vh;
   height: 100dvh; /* 手機網址列收合時 100vh 會算錯，dvh 才是實際可視高度 */
+  /* 有些裝置上 100dvh 算出來比視窗矮，底下就空一塊。
+     把 App 往下補足那一塊，分頁列與數字鍵盤會整個跟著下移，
+     而且是「長高」不是「位移」—— 裡面的東西不會被裁掉。 */
+  height: calc(100dvh + var(--bottom-shift));
 }
 
 .app__main {
@@ -194,10 +201,7 @@ button { cursor: pointer; }
   display: flex;
   background: var(--c-surface);
   border-top: 1px solid var(--c-border);
-  /* 下內距少 20px，整條分頁列的內容就往下移 20px ——
-     它是底部錨定的，高度變矮時上緣會往下走。
-     max() 是給沒有 safe area 的裝置用的，避免算出負值。 */
-  padding-bottom: max(0px, calc(var(--safe-bottom) - 20px));
+  padding-bottom: var(--safe-bottom);
   flex-shrink: 0;
 }
 
@@ -245,8 +249,7 @@ button { cursor: pointer; }
   flex-shrink: 0;
   background: var(--c-surface);
   border-top: 1px solid var(--c-border);
-  /* 同分頁列：下內距少 20px，數字鍵盤與「完成」整塊往下移 20px */
-  padding: 8px 8px max(0px, calc(8px + var(--safe-bottom) - 20px));
+  padding: 8px 8px calc(8px + var(--safe-bottom));
 }
 
 .segment {
