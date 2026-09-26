@@ -90,6 +90,10 @@ button { cursor: pointer; }
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
   padding-top: var(--safe-top);
+  /* html/body 上的 overscroll-behavior 擋的是「整份文件」的回彈，
+     但真正在捲動的是這一層。iOS 捲到頂再往下拉時，這一層自己會橡皮筋，
+     整個畫面跟著往下滑一截，看起來就像版面壞掉。 */
+  overscroll-behavior-y: none;
 }
 
 .view { display: block; }
@@ -481,7 +485,13 @@ button { cursor: pointer; }
 }
 
 .summary-card__label { font-size: 11px; color: var(--c-text-muted); }
-.summary-card__value { font-size: 17px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.summary-card__value {
+  /* 三張卡平分寬度，位數多或螢幕窄時就擠不下。讓字級跟著寬度縮 ——
+     數字被切掉（131,798 變成 131,79…）比字小一點嚴重得多。 */
+  font-size: clamp(13px, 4.3vw, 17px);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
 .summary-card.is-income .summary-card__value { color: var(--c-income); }
 .summary-card.is-expense .summary-card__value { color: var(--c-expense); }
 
@@ -700,7 +710,9 @@ button { cursor: pointer; }
 .stat { text-align: center; min-width: 0; }
 .stat__label { font-size: 11px; color: var(--c-text-muted); }
 .stat__value {
-  font-size: 15px;
+  /* 同上。這一列最多四格，比 summary-card 更擠，係數再小一點。
+     ellipsis 留著當最後一道防線，但正常情況不該用到。 */
+  font-size: clamp(11px, 3.6vw, 15px);
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   overflow: hidden;
@@ -917,6 +929,18 @@ button { cursor: pointer; }
 .toast--error { background: var(--c-danger); }
 
 .is-hidden { display: none !important; }
+
+/* 很窄的手機（iPhone SE 之類的 320px）：內距與間距一起收，多讓幾像素給數字 */
+@media (max-width: 360px) {
+  .view--ledger, .view--assets, .view--report, .view--settings {
+    padding-left: 10px;
+    padding-right: 10px;
+  }
+  .summary-cards { gap: 6px; }
+  .summary-card { padding: 10px 5px; }
+  .stat-row { padding: 12px 5px; gap: 4px; }
+  .stat__label, .summary-card__label { font-size: 10px; }
+}
 
 /* 平板與桌機：內容置中，不要拉成一整片 */
 @media (min-width: 640px) {
