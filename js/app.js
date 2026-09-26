@@ -14,7 +14,7 @@ import {
   isStandalone, detectPlatform, createInstallPromptController, shouldShowInstallBanner,
 } from './lib/install.js';
 
-export const APP_VERSION = '1.18.6';
+export const APP_VERSION = '1.19.0';
 
 const TABS = [
   { id: 'entry', label: '記帳', icon: '✏️' },
@@ -77,6 +77,50 @@ async function main() {
   registerServiceWorker();
   maybeShowFirstRunGuide();
   startAutoQuoteUpdates();
+  keepWindowPinned();
+}
+
+/**
+ * 把視窗釘在最上面。
+ *
+ * iOS 的鍵盤彈出時，系統會把「整個視窗」往上捲以露出輸入框。
+ * 收起鍵盤後它不一定會捲回去 —— 於是整個 App 往上位移，
+ * 底下露出一塊空白，看起來就像版面壞掉。
+ * 每打一次字（金額、備註、搜尋）都可能發生一次，所以是「用久了才跑版」，
+ * 一開始看起來好好的。
+ *
+ * 這個 App 所有的捲動都發生在 .app__main 裡面，視窗本身永遠不該被捲動。
+ * 但也不能見到捲動就拉回去 —— 鍵盤開著的時候那個位移是必要的，
+ * 硬拉回去會讓使用者看不到自己正在打字的欄位。
+ * 所以只在「鍵盤收起來之後」才校正。
+ */
+function keepWindowPinned() {
+  const pin = () => {
+    if (globalThis.scrollY !== 0) globalThis.scrollTo(0, 0);
+  };
+
+  const isTyping = () => {
+    const a = document.activeElement;
+    return Boolean(a) && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.isContentEditable);
+  };
+
+  const pinIfIdle = () => {
+    // 延遲一下再看：focusout 當下焦點可能正要移到另一個輸入框
+    setTimeout(() => { if (!isTyping()) pin(); }, 120);
+  };
+
+  globalThis.addEventListener('focusout', pinIfIdle);
+  globalThis.addEventListener('orientationchange', () => setTimeout(pin, 250));
+
+  // 鍵盤收起來時 visualViewport 會變回整個視窗高度，那是最可靠的收尾時機
+  globalThis.visualViewport?.addEventListener('resize', () => {
+    if (globalThis.visualViewport.height >= globalThis.innerHeight - 8) pinIfIdle();
+  });
+
+  // 回到前景時也校正一次：切出去再切回來是另一個常見的位移時機
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') pinIfIdle();
+  });
 }
 
 /**

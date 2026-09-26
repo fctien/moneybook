@@ -145,6 +145,11 @@ export function createSettingsView({ appVersion = '1.0.0', installer = null, ope
         // 0 代表 App 有畫到狀態列底下（缺的那塊在螢幕下方）；
         // 不是 0 代表 iOS 把視口往下推了（缺的那塊在上方）。修法完全相反。
         ['視口在螢幕上的起點 screenY', `${globalThis.screenY ?? globalThis.screenTop ?? '不支援'}`],
+        // 跑版當下這兩項最有價值：視窗被捲走了，或 body 比視窗高，
+        // 都會讓整個 App 往上位移、底下露出空白
+        ['視窗捲動位置 scrollY', `${Math.round(globalThis.scrollY)}`],
+        ['body 高度', `${Math.round(document.body.scrollHeight)}`],
+        ['body 比視窗高', `${Math.round(document.body.scrollHeight - innerHeight)}`],
         ['裝置像素比', `${devicePixelRatio}`],
         ['safe-area 上', cs.getPropertyValue('--safe-top').trim() || '0px'],
         ['safe-area 下', cs.getPropertyValue('--safe-bottom').trim() || '0px'],

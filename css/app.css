@@ -54,7 +54,6 @@ html, body {
   margin: 0;
   padding: 0;
   height: 100%;
-  overflow: hidden; /* .app 已經釘在視口上，body 不該再能捲動 */
   overscroll-behavior-y: none; /* 擋掉 iOS 整頁橡皮筋回彈，避免看起來像壞掉 */
 }
 
@@ -85,15 +84,10 @@ button { cursor: pointer; }
 /* ------------------------------------------------------------------ 版面 */
 
 .app {
-  /* 直接釘在可視區上，而不是用 100dvh 去「算」高度。
-     iOS 上 dvh 會因為工具列收合、鍵盤、手勢動畫而變動，
-     只要算出來比螢幕短一點，底下就會露出 body 的背景色 ——
-     使用者看到的就是「畫面沒有全面展開，下面一塊空白」。
-     position: fixed + inset: 0 貼的是版面視口，沒有這個問題。 */
-  position: fixed;
-  inset: 0;
   display: flex;
   flex-direction: column;
+  height: 100vh;
+  height: 100dvh; /* 手機網址列收合時 100vh 會算錯，dvh 才是實際可視高度 */
 }
 
 .app__main {
@@ -101,20 +95,13 @@ button { cursor: pointer; }
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
   padding-top: var(--safe-top);
-  /* html/body 上的 overscroll-behavior 擋的是「整份文件」的回彈，
-     但真正在捲動的是這一層。iOS 捲到頂再往下拉時，這一層自己會橡皮筋，
-     整個畫面跟著往下滑一截，看起來就像版面壞掉。 */
-  overscroll-behavior-y: none;
 }
 
 .view { display: block; }
 
-/* 除了記帳頁以外都是一般捲動內容。
-   底部不加 --safe-bottom：這些內容在 .app__main 裡，而 .app__main 上面就是分頁列，
-   分頁列自己已經把 home indicator 那塊墊掉了。兩邊都加就會多留一次，
-   在 iPhone 上就是「下面空一大塊」。 */
+/* 除了記帳頁以外都是一般捲動內容 */
 .view--ledger, .view--assets, .view--report, .view--settings {
-  padding: 12px 14px 20px;
+  padding: 12px 14px calc(20px + var(--safe-bottom));
 }
 
 .boot {
@@ -244,8 +231,7 @@ button { cursor: pointer; }
   flex-shrink: 0;
   background: var(--c-surface);
   border-top: 1px solid var(--c-border);
-  /* 同上：分頁列已經墊過 safe area，這裡再墊一次就是重複 */
-  padding: 8px 8px;
+  padding: 8px 8px calc(8px + var(--safe-bottom));
 }
 
 .segment {
@@ -500,13 +486,7 @@ button { cursor: pointer; }
 }
 
 .summary-card__label { font-size: 11px; color: var(--c-text-muted); }
-.summary-card__value {
-  /* 三張卡平分寬度，位數多或螢幕窄時就擠不下。讓字級跟著寬度縮 ——
-     數字被切掉（131,798 變成 131,79…）比字小一點嚴重得多。 */
-  font-size: clamp(13px, 4.3vw, 17px);
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-}
+.summary-card__value { font-size: 17px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .summary-card.is-income .summary-card__value { color: var(--c-income); }
 .summary-card.is-expense .summary-card__value { color: var(--c-expense); }
 
@@ -725,9 +705,7 @@ button { cursor: pointer; }
 .stat { text-align: center; min-width: 0; }
 .stat__label { font-size: 11px; color: var(--c-text-muted); }
 .stat__value {
-  /* 同上。這一列最多四格，比 summary-card 更擠，係數再小一點。
-     ellipsis 留著當最後一道防線，但正常情況不該用到。 */
-  font-size: clamp(11px, 3.6vw, 15px);
+  font-size: 15px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   overflow: hidden;
@@ -861,9 +839,7 @@ button { cursor: pointer; }
 
 .sheet {
   width: 100%;
-  /* 不用 vh：backdrop 已經是 fixed inset:0，高度是確定的，
-     用百分比才不會受 iOS 工具列伸縮影響而讓面板底部跑到畫面外 */
-  max-height: 88%;
+  max-height: 88vh;
   background: var(--c-surface);
   border-radius: 18px 18px 0 0;
   display: flex;
@@ -967,18 +943,6 @@ button { cursor: pointer; }
 .toast--error { background: var(--c-danger); }
 
 .is-hidden { display: none !important; }
-
-/* 很窄的手機（iPhone SE 之類的 320px）：內距與間距一起收，多讓幾像素給數字 */
-@media (max-width: 360px) {
-  .view--ledger, .view--assets, .view--report, .view--settings {
-    padding-left: 10px;
-    padding-right: 10px;
-  }
-  .summary-cards { gap: 6px; }
-  .summary-card { padding: 10px 5px; }
-  .stat-row { padding: 12px 5px; gap: 4px; }
-  .stat__label, .summary-card__label { font-size: 10px; }
-}
 
 /* 平板與桌機：內容置中，不要拉成一整片 */
 @media (min-width: 640px) {
