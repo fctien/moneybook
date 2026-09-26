@@ -14,7 +14,7 @@ import {
   isStandalone, detectPlatform, createInstallPromptController, shouldShowInstallBanner,
 } from './lib/install.js';
 
-export const APP_VERSION = '1.28.1';
+export const APP_VERSION = '1.29.0';
 
 const TABS = [
   { id: 'entry', label: '記帳', icon: '✏️' },
@@ -90,41 +90,6 @@ async function main() {
   startAutoQuoteUpdates();
   keepWindowPinned();
   watchViewportHeight();
-  fitAppToScreen();
-}
-
-/**
- * 讓 App 填滿整個螢幕。
- *
- * 實機症狀：剛開啟時 iOS 給的視口高度是「扣掉狀態列」的（812），
- * 螢幕其實是 874；要等到某次互動（例如輸入數字）才會變成 874。
- * 在那之前，畫面下方就空一塊。
- *
- * 使用者輸入數字後的截圖證明了 App 確實可以佔滿 874 ——
- * 所以不等 iOS 自己修正，直接以 screen.height 為準。
- *
- * 只在「已加到主畫面」且「視口確實比螢幕矮」時才覆寫：
- * - 在 Safari 裡視口本來就該比螢幕矮（工具列佔掉了），硬撐會把內容推出畫面
- * - 視口已經等於螢幕時不必多此一舉
- * 視口自己追上來之後就把覆寫拿掉，交還給瀏覽器。
- */
-function fitAppToScreen() {
-  const root = document.documentElement;
-
-  const fit = () => {
-    const short = globalThis.screen?.height - globalThis.innerHeight;
-    if (isStandalone() && short > 4) root.style.setProperty('--app-h', `${globalThis.screen.height}px`);
-    else root.style.removeProperty('--app-h');
-  };
-
-  fit();
-  globalThis.addEventListener('resize', fit);
-  globalThis.addEventListener('orientationchange', () => setTimeout(fit, 300));
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') setTimeout(fit, 200);
-  });
-  // iOS 有時要幾百毫秒才把視口定下來，多補幾次確認
-  for (const t of [120, 500, 1500]) setTimeout(fit, t);
 }
 
 

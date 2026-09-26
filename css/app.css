@@ -65,7 +65,6 @@ html, body {
   margin: 0;
   padding: 0;
   height: 100%;
-  overflow: hidden; /* .app 已經釘在視口上，body 不該再能捲動 */
   overscroll-behavior-y: none; /* 擋掉 iOS 整頁橡皮筋回彈，避免看起來像壞掉 */
 }
 
@@ -91,26 +90,10 @@ button { cursor: pointer; }
 /* ------------------------------------------------------------------ 版面 */
 
 .app {
-  /*
-   * 不用 100dvh 算高度，直接釘在版面視口上。
-   *
-   * 實機症狀：剛開啟 App 時畫面比螢幕矮一截（底下露出空白），
-   * 一輸入數字就恢復正常。原因是 iOS 首次繪製時給的 dvh 是
-   * 「扣掉狀態列」的高度，要等到某次重新排版才更新 ——
-   * 打字就是那個觸發點。整天追的「有時滿版有時不滿」就是這個。
-   *
-   * position: fixed + inset: 0 貼的是版面視口，由瀏覽器自己維護，
-   * 沒有這個時序問題，也不必用 JS 去量。
-   */
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  /* 高度預設就是視口高。
-     iOS 首次繪製給的視口偏矮時，app.js 會把 --app-h 覆寫成實際的螢幕高度。 */
-  height: var(--app-h, 100%);
   display: flex;
   flex-direction: column;
+  height: 100vh;
+  height: 100dvh; /* 手機網址列收合時 100vh 會算錯，dvh 才是實際可視高度 */
 }
 
 .app__main {
