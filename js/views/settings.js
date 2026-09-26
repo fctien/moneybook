@@ -128,15 +128,18 @@ export function createSettingsView({ appVersion = '1.0.0', installer = null, ope
    */
   async function checkUpdateNow() {
     toast('檢查中…', 'info', 2000);
-    const { checkForUpdate } = await import('../app.js');
-    const result = await checkForUpdate();
-    if (result === 'ready') {
-      toast('有新版本，正在套用…', 'success', 2500);
-      setTimeout(() => location.reload(), 1200);
-    } else if (result === 'latest') {
+    const { checkForUpdate, forceUpdate } = await import('../app.js');
+    const { state, live } = await checkForUpdate();
+
+    if (state === 'ready') {
+      toast(live ? `有新版本 v${live}，正在更新…` : '有新版本，正在更新…', 'success', 3000);
+      setTimeout(forceUpdate, 900);
+    } else if (state === 'latest') {
       toast(`已經是最新版本 v${appVersion}`, 'success', 3000);
+    } else if (state === 'unsupported') {
+      toast('這個環境不支援自動更新', 'info', 3000);
     } else {
-      toast('檢查失敗，請確認網路連線', 'error', 3000);
+      toast('連不到伺服器，請確認網路後再試', 'error', 3500);
     }
   }
 
@@ -156,7 +159,7 @@ export function createSettingsView({ appVersion = '1.0.0', installer = null, ope
       const vv = globalThis.visualViewport;
 
       const rows = [
-        ['版本', `v${appVersion}`],
+        ['版本（目前執行）', `v${appVersion}`],
         ['獨立 App（已加到主畫面）', isStandalone() ? '是' : '否'],
         ['視窗 innerWidth × innerHeight', `${innerWidth} × ${innerHeight}`],
         ['visualViewport 高', vv ? `${Math.round(vv.height)}` : '不支援'],

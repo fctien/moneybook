@@ -9,7 +9,7 @@
  * 清除快取只會讓 App 重新下載程式碼，不會動到任何一筆帳。
  */
 
-const CACHE_VERSION = 'moneybook-v1.21.0';
+const CACHE_VERSION = 'moneybook-v1.21.3';
 
 const APP_SHELL = [
   './',
@@ -76,7 +76,11 @@ self.addEventListener('fetch', (event) => {
 
   // 只處理自己網域的 GET，其餘一律放行給瀏覽器
   if (request.method !== 'GET') return;
-  if (new URL(request.url).origin !== self.location.origin) return;
+  const url = new URL(request.url);
+  if (url.origin !== self.location.origin) return;
+  // 「檢查更新」用來探測線上版本的請求帶著 ?v=<時間戳>，
+  // 必須真的走到網路，否則會讀到快取裡的舊檔、永遠以為自己是最新版
+  if (url.searchParams.has('v')) return;
 
   event.respondWith(
     caches.match(request).then((cached) => {

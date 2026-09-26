@@ -14,7 +14,7 @@ import {
   isStandalone, detectPlatform, createInstallPromptController, shouldShowInstallBanner,
 } from './lib/install.js';
 
-export const APP_VERSION = '1.21.0';
+export const APP_VERSION = '1.21.3';
 
 const TABS = [
   { id: 'entry', label: '記帳', icon: '✏️' },
@@ -368,17 +368,70 @@ async function maybeShowFirstRunGuide() {
 /** 有新版正在等著套用 */
 let updateReady = false;
 
-/** 供設定頁的「檢查更新」使用 */
-export async function checkForUpdate() {
-  if (!('serviceWorker' in navigator)) return 'unsupported';
-  const reg = await navigator.serviceWorker.getRegistration();
-  if (!reg) return 'unsupported';
+/**
+ * 直接去伺服器讀 app.js 的版本號。
+ *
+ * 不靠 Service Worker 的狀態來判斷有沒有新版 —— sw.js 呼叫了 skipWaiting()，
+ * 新的 worker 會直接跳過 waiting 進入啟用，於是 reg.waiting 幾乎永遠是 null。
+ * 拿它當依據會一律回報「已經是最新版」，而使用者其實卡在舊版。
+ * 比對版本號沒有這種模糊地帶：不一樣就是有新版。
+ */
+async function fetchLiveVersion() {
   try {
-    await reg.update();
+    // 網址一定要帶一個每次都不同的參數。
+    // Service Worker 的 fetch 處理是 cache-first，而 caches.match() 比對的是完整網址 ——
+    // 直接抓 './js/app.js' 會被自己的快取攔截、讀到舊檔，
+    // 於是「檢查更新」永遠回報「已經是最新版」。fetch 的 cache: 'no-store'
+    // 管的是 HTTP 快取，擋不住 Service Worker。
+    const res = await fetch(`./js/app.js?v=${Date.now()}`, { cache: 'no-store' });
+    if (!res.ok) return null;
+    return (await res.text()).match(/APP_VERSION\s*=\s*'([^']+)'/)?.[1] ?? null;
   } catch {
-    return 'failed';
+    return null;
   }
-  return updateReady || reg.waiting ? 'ready' : 'latest';
+}
+
+/**
+ * 供設定頁的「檢查更新」使用。
+ * @returns {Promise<{state:'latest'|'ready'|'failed'|'unsupported', live?:string}>}
+ */
+export async function checkForUpdate() {
+  const live = await fetchLiveVersion();
+
+  if (live && live !== APP_VERSION) return { state: 'ready', live };
+  if (live === APP_VERSION) {
+    // 版本號一樣就是真的最新，順手讓 SW 也去檢查一次，下次就不必再手動
+    navigator.serviceWorker?.getRegistration().then((r) => r?.update()).catch(() => {});
+    return { state: 'latest', live };
+  }
+
+  // 連不到伺服器（離線），只好退回看 SW 的狀態
+  if (!('serviceWorker' in navigator)) return { state: 'unsupported' };
+  const reg = await navigator.serviceWorker.getRegistration();
+  if (!reg) return { state: 'unsupported' };
+  return { state: updateReady || reg.waiting || reg.installing ? 'ready' : 'failed' };
+}
+
+/**
+ * 強制換上新版。
+ *
+ * 清掉 Service Worker 的快取再重新載入 —— 光是 reload 沒有用，
+ * 舊的快取還在，載進來的仍然是舊程式碼。
+ *
+ * 只清程式檔的快取，**不會動到記帳資料**（那在 IndexedDB 裡，是另一回事）。
+ */
+export async function forceUpdate() {
+  try {
+    const reg = await navigator.serviceWorker?.getRegistration();
+    if (reg) await reg.update();
+  } catch { /* 沒有 SW 也無所謂，照樣清快取重載 */ }
+
+  try {
+    const keys = await caches.keys();
+    await Promise.all(keys.map((k) => caches.delete(k)));
+  } catch { /* 清不掉就算了，至少還會重新載入 */ }
+
+  location.reload();
 }
 
 function registerServiceWorker() {
