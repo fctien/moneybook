@@ -162,10 +162,29 @@ export function createSettingsView({ appVersion = '1.0.0', installer = null, ope
         `UA: ${navigator.userAgent}`,
       ].join(String.fromCharCode(10));
 
+      // 視口比螢幕矮，就不是 CSS 問題了 —— App 已經填滿它拿得到的全部空間。
+      // 這種情況多半是主畫面捷徑記住了舊機型的視窗大小（換機、從備份還原之後最常見），
+      // 只有重新加到主畫面才會更新。直接把判斷與做法寫在這裡，不要只丟一堆數字。
+      const short = screen.height - innerHeight;
+
       body.append(
         el('p.sheet__message', {
           text: '這些是這台裝置回報的實際數字。若版面看起來不對，把它複製給我。',
         }),
+        short > 4
+          ? el('div.help-block', {}, [
+            el('div.help-block__title', { text: `⚠ 視口比螢幕矮 ${short} 點` }),
+            el('p.hint', {
+              text: 'App 已經填滿它能拿到的全部空間，少掉的那塊是 iOS 沒有給這個主畫面捷徑，'
+                + 'CSS 畫不到。這通常是捷徑記住了舊機型的視窗大小（換手機或從備份還原後最常見），'
+                + '重新加到主畫面就會更新。',
+            }),
+            el('p.hint.hint--warn', {
+              text: '重要：iOS 刪掉主畫面捷徑會一併刪掉它的資料。'
+                + '請務必先到「備份與還原 → 匯出備份檔」存一份，刪除重加之後再還原。',
+            }),
+          ])
+          : null,
         // 按鈕放最上面：這張表有十幾列，擺在最後的話在小螢幕上要捲很久才看得到，
         // 使用者會以為根本沒有這顆按鈕
         el('div.sheet__actions.sheet__actions--stack', {}, [
