@@ -14,7 +14,7 @@ import {
   isStandalone, detectPlatform, createInstallPromptController, shouldShowInstallBanner,
 } from './lib/install.js';
 
-export const APP_VERSION = '1.20.0';
+export const APP_VERSION = '1.20.1';
 
 const TABS = [
   { id: 'entry', label: '記帳', icon: '✏️' },
@@ -387,7 +387,11 @@ function registerServiceWorker() {
   if (location.protocol === 'file:') return;
 
   const register = () => {
-    navigator.serviceWorker.register('./sw.js').then((reg) => {
+    // updateViaCache: 'none' —— 不要用 HTTP 快取去檢查 sw.js。
+    // GitHub Pages 給 sw.js 的 Cache-Control 是 max-age=600，
+    // 若在十分鐘內重開好幾次，每次拿到的都是快取裡的舊 sw.js，
+    // 於是「重開就會更新」這個直覺會失效，使用者怎麼試都停在舊版。
+    navigator.serviceWorker.register('./sw.js', { updateViaCache: 'none' }).then((reg) => {
       reg.addEventListener('updatefound', () => {
         const worker = reg.installing;
         worker?.addEventListener('statechange', () => {
