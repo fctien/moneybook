@@ -14,7 +14,7 @@ import {
   isStandalone, detectPlatform, createInstallPromptController, shouldShowInstallBanner,
 } from './lib/install.js';
 
-export const APP_VERSION = '1.19.2';
+export const APP_VERSION = '1.20.0';
 
 const TABS = [
   { id: 'entry', label: '記帳', icon: '✏️' },
@@ -79,6 +79,41 @@ async function main() {
   maybeShowFirstRunGuide();
   startAutoQuoteUpdates();
   keepWindowPinned();
+  watchViewportHeight();
+}
+
+/**
+ * 記錄視窗高度的變化。
+ *
+ * 使用者說「剛更新完是滿版的，用一陣子就跑版」。若真是如此，
+ * innerHeight 會在使用途中變小而且不再回來 —— 這是唯一能證實或推翻的證據，
+ * 而它只發生在真實裝置上，電腦重現不了。
+ *
+ * 只記在記憶體與設定裡，不送出去任何地方。
+ */
+const VIEWPORT_LOG_KEY = 'viewportLog';
+
+function watchViewportHeight() {
+  const now = () => new Date().toTimeString().slice(0, 8);
+  const log = store.getSetting(VIEWPORT_LOG_KEY, null) || {};
+
+  const record = (why) => {
+    const h = globalThis.innerHeight;
+    log.last = h;
+    log.lastAt = now();
+    log.lastWhy = why;
+    if (!log.max || h > log.max) { log.max = h; log.maxAt = now(); }
+    if (!log.min || h < log.min) { log.min = h; log.minAt = now(); log.minWhy = why; }
+    // silent：純粹是診斷資料，不需要因此重畫任何畫面
+    store.setSetting(VIEWPORT_LOG_KEY, log, { silent: true }).catch(() => {});
+  };
+
+  record('啟動');
+  globalThis.addEventListener('resize', () => record('resize'));
+  globalThis.addEventListener('orientationchange', () => setTimeout(() => record('轉向'), 300));
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') setTimeout(() => record('回到前景'), 300);
+  });
 }
 
 /**
@@ -330,6 +365,22 @@ async function maybeShowFirstRunGuide() {
   });
 }
 
+/** 有新版正在等著套用 */
+let updateReady = false;
+
+/** 供設定頁的「檢查更新」使用 */
+export async function checkForUpdate() {
+  if (!('serviceWorker' in navigator)) return 'unsupported';
+  const reg = await navigator.serviceWorker.getRegistration();
+  if (!reg) return 'unsupported';
+  try {
+    await reg.update();
+  } catch {
+    return 'failed';
+  }
+  return updateReady || reg.waiting ? 'ready' : 'latest';
+}
+
 function registerServiceWorker() {
   if (!('serviceWorker' in navigator)) return;
   // file:// 開啟時無法註冊 Service Worker，直接略過而不是拋錯
@@ -341,12 +392,34 @@ function registerServiceWorker() {
         const worker = reg.installing;
         worker?.addEventListener('statechange', () => {
           if (worker.state === 'installed' && navigator.serviceWorker.controller) {
-            toast('已下載新版本，下次開啟時生效', 'info', 4000);
+            updateReady = true;
+            toast('已下載新版本，回到主畫面再開啟即可生效', 'info', 5000);
           }
         });
       });
+
+      // 瀏覽器只在「導航」時自動檢查新版。獨立 App 被留在背景好幾天都不會導航一次，
+      // 於是使用者永遠停在舊版本 —— 這也是為什麼會出現「我看不到新版」。
+      // 啟動時與每次回到前景都主動問一次。
+      const poll = () => { reg.update().catch(() => {}); };
+      poll();
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') poll();
+      });
     }).catch((err) => console.warn('Service Worker 註冊失敗', err));
   };
+
+  // 新的 Service Worker 接手之後，畫面上跑的仍然是舊的程式碼，必須重新載入才會換。
+  // 但不能說換就換 —— 使用者可能正在輸入。等下次回到前景這個自然的斷點再做。
+  if (navigator.serviceWorker.controller) {
+    navigator.serviceWorker.addEventListener('controllerchange', () => { updateReady = true; });
+  }
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible' || !updateReady) return;
+    const busy = document.querySelector('.sheet-backdrop')
+      || ['INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName);
+    if (!busy) location.reload();
+  });
 
   // app.js 以 type="module" 載入（等同 defer），而且 main() 裡還 await 了 store.init()，
   // 走到這一行時 load 事件通常「早就觸發過」了 —— 此時才掛監聽器，它永遠不會被呼叫，

@@ -63,6 +63,7 @@ export function createSettingsView({ appVersion = '1.0.0', installer = null, ope
         el('h2.card__title', { text: '關於' }),
         el('p.about-text', { text: `MoneyBook v${appVersion}` }),
         el('div.row-list', {}, [
+          rowButton('🔄', '檢查更新', checkUpdateNow),
           rowButton('📐', '版面診斷', openLayoutDiagnostics),
         ]),
         el('p.about-text.about-text--muted', {
@@ -119,6 +120,27 @@ export function createSettingsView({ appVersion = '1.0.0', installer = null, ope
   }
 
   /**
+   * 手動檢查更新。
+   *
+   * 瀏覽器只在「導航」時才自動檢查新版的 Service Worker，
+   * 而獨立 App 可能好幾天都不會導航一次 —— 使用者就會卡在舊版本。
+   * 程式已經改成啟動與回到前景時主動檢查，這裡再給一個明確的手動入口。
+   */
+  async function checkUpdateNow() {
+    toast('檢查中…', 'info', 2000);
+    const { checkForUpdate } = await import('../app.js');
+    const result = await checkForUpdate();
+    if (result === 'ready') {
+      toast('有新版本，正在套用…', 'success', 2500);
+      setTimeout(() => location.reload(), 1200);
+    } else if (result === 'latest') {
+      toast(`已經是最新版本 v${appVersion}`, 'success', 3000);
+    } else {
+      toast('檢查失敗，請確認網路連線', 'error', 3000);
+    }
+  }
+
+  /**
    * 版面診斷。
    *
    * 「畫面沒展開、底下一塊空白」這類問題在電腦上重現不了 ——
@@ -128,6 +150,7 @@ export function createSettingsView({ appVersion = '1.0.0', installer = null, ope
   function openLayoutDiagnostics() {
     openSheet('版面診斷', (body) => {
       const cs = getComputedStyle(document.documentElement);
+      const vlog = store.getSetting('viewportLog', null) || {};
       const appBox = document.querySelector('.app')?.getBoundingClientRect();
       const tabBox = document.querySelector('.tabbar')?.getBoundingClientRect();
       const vv = globalThis.visualViewport;
@@ -162,6 +185,10 @@ export function createSettingsView({ appVersion = '1.0.0', installer = null, ope
         ['App 底部剩餘空白', appBox ? `${Math.round(innerHeight - appBox.bottom)}` : '—'],
         // 不是 0 就代表視口本身比螢幕小 —— 那不是 CSS 能解決的
         ['視口比螢幕短', `${screen.height - innerHeight}`],
+        // 「更新完是滿版、用一陣子就跑版」要靠這三項才證實得了
+        ['視窗高｜啟動以來最大', vlog.max ? `${vlog.max}（${vlog.maxAt}）` : '—'],
+        ['視窗高｜啟動以來最小', vlog.min ? `${vlog.min}（${vlog.minAt}・${vlog.minWhy ?? ''}）` : '—'],
+        ['視窗高｜最後一次', vlog.last ? `${vlog.last}（${vlog.lastAt}・${vlog.lastWhy ?? ''}）` : '—'],
       ];
 
       const text = [
