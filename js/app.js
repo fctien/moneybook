@@ -14,7 +14,7 @@ import {
   isStandalone, detectPlatform, createInstallPromptController, shouldShowInstallBanner,
 } from './lib/install.js';
 
-export const APP_VERSION = '1.24.0';
+export const APP_VERSION = '1.25.0';
 
 const TABS = [
   { id: 'entry', label: '記帳', icon: '✏️' },
@@ -66,8 +66,13 @@ async function main() {
 
   const main = el('main.app__main', { id: 'main' });
   const tabbar = buildTabBar();
-  const banner = buildInstallBanner();
-  root.append(main, banner, tabbar);
+
+  // v1.25.0：使用者要對照 v1.17.0 的版面，而「加到主畫面」提示列是 v1.18.0
+  // 才加的，那一版還不存在。掛上去就不是 v1.17.0 的版面了，所以這一版不掛。
+  // 設定 → 加到主畫面 裡的說明與安裝按鈕不受影響，照常可用。
+  const SHOW_INSTALL_BANNER = false;
+  const banner = SHOW_INSTALL_BANNER ? buildInstallBanner() : null;
+  root.append(main, ...(banner ? [banner] : []), tabbar);
 
   // 只有目前分頁掛在 DOM 上，切換時整個換掉。
   // 資料量小、DOM 也不大，這比維持五份隱藏 DOM 更省記憶體也更好推理。
