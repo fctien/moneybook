@@ -14,7 +14,7 @@ import {
   isStandalone, detectPlatform, createInstallPromptController, shouldShowInstallBanner,
 } from './lib/install.js';
 
-export const APP_VERSION = '1.29.2';
+export const APP_VERSION = '1.29.3';
 
 const TABS = [
   { id: 'entry', label: '記帳', icon: '✏️' },
@@ -142,7 +142,10 @@ function captureLayoutSnapshots() {
   // 啟動後連拍三次。不用 requestAnimationFrame —— 畫面在背景時它不會觸發。
   // 拍三次的用意：若視口會自己從矮變高，這三筆就看得出來是「自己會好」
   // 還是「非得等使用者輸入」。
-  save('啟動 0 秒');
+  // 不要在啟動流程裡同步讀版面 —— getBoundingClientRect() 會強迫瀏覽器
+  // 當下就把 layout 算定，那等於在量測的同時干擾被量測的對象。
+  // 一律排到下一個工作迴圈之後再量。
+  setTimeout(() => save('啟動 0 秒'), 0);
   setTimeout(() => save('啟動 1 秒'), 1000);
   setTimeout(() => save('啟動 3 秒'), 3000);
 
