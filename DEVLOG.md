@@ -1504,3 +1504,37 @@ root.style.setProperty('--app-min-h', `${Math.max(...sources)}px`);
 把 `min-height: var(--app-min-h, 0px)` 這一行從 `.app` 拿掉即可，
 其餘不受影響。這是刻意做成可單行回退的。
 
+---
+
+## 2026-09-26 結案：v1.31.0 經使用者實機確認有效
+
+**結果**
+使用者回報「成功」—— 剛開啟 PWA 時已經是滿版，不必再輸入數字才恢復。
+
+**最終的解法（整段追查的結論）**
+
+| 項目 | 內容 |
+|---|---|
+| 症狀 | iOS 主畫面 PWA 剛開啟時畫面比螢幕短一截，使用者輸入數字後才變正常 |
+| 成因 | `100dvh` 在 iOS 剛開啟時被算成「扣掉狀態列」的高度（812），實際全螢幕是 874；要等某次重新排版才修正 |
+| 解法 | 保留 `height: 100dvh`，另加 `min-height: var(--app-min-h)`，由 JS 取 `innerHeight` / `visualViewport` / `clientHeight` /（standalone 時）`screen.height` 的最大值，並在數個時間點重算 |
+| 為何安全 | `min-height` **只會讓 App 變高、不會變矮**，量錯也不會比不做更糟；回退只需刪一行 |
+
+**走過的冤枉路（保留下來當紀錄）**
+縮下內距、`position: fixed; inset: 0`、相對位移、撐高 App、改
+`apple-mobile-web-app-status-bar-style`、歸零 safe-area、重裝主畫面捷徑 ——
+七種嘗試，全部無效或更糟。其中 `position: fixed; inset: 0` 反而讓情況變糟，
+因為它貼的是版面視口（812）而不是 `dvh` 的全螢幕高度（874）。
+
+**真正推動進展的三個觀察，全部來自使用者**
+1. 「用久了才跑版」→ 排除靜態 CSS
+2. 「剛進去不對，輸入數字後就對了」→ 鎖定為時序問題
+3. 「Safari 沒事，只有 App 有事」→ 鎖定為 standalone 的視口配置
+
+**附帶完成的修正**
+- Service Worker 從不檢查更新（使用者長期卡在舊版且毫無徵兆）
+- 「檢查更新」被自己的 cache-first 攔截，永遠回報「已是最新版」
+- 版面改用 `em`，跟著使用者調大的系統字體縮放
+- 狀態列蓋住最上排按鈕
+- iOS 鍵盤把視窗捲走後不捲回來
+
