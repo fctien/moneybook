@@ -22,7 +22,17 @@
   --radius-sm: 10px;
   --shadow: 0 1px 3px rgba(16, 24, 40, 0.08), 0 1px 2px rgba(16, 24, 40, 0.04);
 
-  --safe-top: env(safe-area-inset-top, 0px);
+  /*
+   * 上緣不墊 safe-area。
+   *
+   * index.html 的 apple-mobile-web-app-status-bar-style 是 default，
+   * iOS 已經把網頁視窗排在狀態列底下了 —— 狀態列那塊根本不在視窗範圍內。
+   * 這時再用 env(safe-area-inset-top) 墊一次，就是把內容白白往下推一截，
+   * 實測會擋住上方的內容。
+   *
+   * 下緣的 --safe-bottom 保留：home indicator 確實在視窗裡面，要閃開。
+   */
+  --safe-top: 0px;
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   --tabbar-h: 58px;
 
