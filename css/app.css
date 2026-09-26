@@ -103,7 +103,12 @@ button { cursor: pointer; }
    * 沒有這個時序問題，也不必用 JS 去量。
    */
   position: fixed;
-  inset: 0;
+  top: 0;
+  left: 0;
+  right: 0;
+  /* 高度預設就是視口高。
+     iOS 首次繪製給的視口偏矮時，app.js 會把 --app-h 覆寫成實際的螢幕高度。 */
+  height: var(--app-h, 100%);
   display: flex;
   flex-direction: column;
 }
