@@ -197,10 +197,43 @@ export function createSettingsView({ appVersion = '1.0.0', installer = null, ope
         ['視窗高｜最後一次', vlog.last ? `${vlog.last}（${vlog.lastAt}・${vlog.lastWhy ?? ''}）` : '—'],
       ];
 
+      // 「啟動當下」與「第一次輸入後」的比對：哪一個數字變了，原因就在那裡
+      const snaps = store.getSetting('layoutSnapshots', null) || globalThis.__layoutSnaps || {};
+      const a = snaps['啟動 0 秒'];
+      const b = snaps['第一次輸入後'];
+      const diffRows = [];
+      if (a && b) {
+        const pick = (o) => ({
+          innerHeight: o.innerHeight,
+          visualViewport: o.visualViewport,
+          clientHeight: o.clientHeight,
+          scrollY: o.scrollY,
+          'App 高': o.app?.h,
+          'App 底部': o.app?.b,
+          '內容區高': o.main?.h,
+          '分頁列底部': o.tabbar?.b,
+        });
+        const pa = pick(a); const pb = pick(b);
+        for (const k of Object.keys(pa)) {
+          const d = (typeof pa[k] === 'number' && typeof pb[k] === 'number') ? pb[k] - pa[k] : null;
+          diffRows.push([k, `${pa[k]} → ${pb[k]}`, d === null ? '' : (d === 0 ? '—' : (d > 0 ? `+${d}` : `${d}`))]);
+        }
+      }
+
+      const NL = String.fromCharCode(10);
       const text = [
         ...rows.map(([k, v]) => `${k}: ${v}`),
+        '',
+        '[視口高度隨時間]',
+        ...['啟動 0 秒', '啟動 1 秒', '啟動 3 秒', '第一次輸入後']
+          .map((k) => `${k}: ${snaps[k] ? `innerHeight ${snaps[k].innerHeight} / App 高 ${snaps[k].app?.h}` : '—'}`),
+        '',
+        '[啟動當下 → 第一次輸入後]',
+        ...(diffRows.length
+          ? diffRows.map(([k, v, d]) => `${k}: ${v}${d ? `  (${d})` : ''}`)
+          : ['（尚未取得，請先到記帳頁按一個數字鍵）']),
         `UA: ${navigator.userAgent}`,
-      ].join(String.fromCharCode(10));
+      ].join(NL);
 
       // 視口比螢幕矮，就不是 CSS 問題了 —— App 已經填滿它拿得到的全部空間。
       // 這種情況多半是主畫面捷徑記住了舊機型的視窗大小（換機、從備份還原之後最常見），
@@ -211,6 +244,24 @@ export function createSettingsView({ appVersion = '1.0.0', installer = null, ope
         el('p.sheet__message', {
           text: '這些是這台裝置回報的實際數字。若版面看起來不對，把它複製給我。',
         }),
+        el('div.help-block', {}, [
+          el('div.help-block__title', { text: '視口高度（innerHeight）隨時間變化' }),
+          el('dl.detail-list', {}, ['啟動 0 秒', '啟動 1 秒', '啟動 3 秒', '第一次輸入後'].flatMap((k) => [
+            el('dt', { text: k }),
+            el('dd', { text: snaps[k] ? `${snaps[k].innerHeight}（App 高 ${snaps[k].app?.h}）` : '—' }),
+          ])),
+        ]),
+        diffRows.length
+          ? el('div.help-block', {}, [
+            el('div.help-block__title', { text: '啟動當下 → 第一次輸入後' }),
+            el('dl.detail-list', {}, diffRows.flatMap(([k, v, d]) => [
+              el('dt', { text: k }),
+              el('dd', { text: d ? `${v}　(${d})` : v }),
+            ])),
+          ])
+          : el('p.hint', {
+            text: b ? '' : '還沒有「第一次輸入後」的快照 —— 請回記帳頁按一個數字鍵，再回來看。',
+          }),
         short > 4
           ? el('div.help-block', {}, [
             el('div.help-block__title', { text: `⚠ 視口比螢幕矮 ${short} 點` }),

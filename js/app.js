@@ -14,7 +14,7 @@ import {
   isStandalone, detectPlatform, createInstallPromptController, shouldShowInstallBanner,
 } from './lib/install.js';
 
-export const APP_VERSION = '1.29.0';
+export const APP_VERSION = '1.29.2';
 
 const TABS = [
   { id: 'entry', label: '記帳', icon: '✏️' },
@@ -90,6 +90,69 @@ async function main() {
   startAutoQuoteUpdates();
   keepWindowPinned();
   watchViewportHeight();
+  captureLayoutSnapshots();
+}
+
+/**
+ * 版面快照：在「啟動當下」與「第一次按數字後」各量一次同樣的東西。
+ *
+ * 使用者觀察到「剛進去沒有滿版，輸入數字後就變長了」。
+ * 要知道原因，得先知道**到底是哪一個數字變了** ——
+ * 是 iOS 給的視口變高，還是我們自己的元素變高。
+ * 兩份快照並排一看就分得出來，不必再猜。
+ *
+ * 只讀不寫，不會改動任何版面。
+ */
+const LAYOUT_SNAPSHOT_KEY = 'layoutSnapshots';
+
+function captureLayoutSnapshots() {
+  const snaps = {};
+  let firstInputDone = false;
+
+  const measure = () => {
+    const box = (sel) => {
+      const el = document.querySelector(sel);
+      if (!el) return null;
+      const r = el.getBoundingClientRect();
+      return { t: Math.round(r.top), b: Math.round(r.bottom), h: Math.round(r.height) };
+    };
+    const cs = getComputedStyle(document.documentElement);
+    return {
+      時間: new Date().toTimeString().slice(0, 8),
+      innerHeight: globalThis.innerHeight,
+      visualViewport: Math.round(globalThis.visualViewport?.height ?? 0),
+      clientHeight: document.documentElement.clientHeight,
+      screenHeight: globalThis.screen?.height ?? 0,
+      scrollY: Math.round(globalThis.scrollY),
+      safeTop: cs.getPropertyValue('--safe-top').trim(),
+      safeBottom: cs.getPropertyValue('--safe-bottom').trim(),
+      app: box('.app'),
+      main: box('.app__main'),
+      tabbar: box('.tabbar'),
+      entryBottom: box('.entry-bottom'),
+    };
+  };
+
+  const save = (tag) => {
+    snaps[tag] = measure();
+    globalThis.__layoutSnaps = snaps;
+    store.setSetting(LAYOUT_SNAPSHOT_KEY, snaps, { silent: true }).catch(() => {});
+  };
+
+  // 啟動後連拍三次。不用 requestAnimationFrame —— 畫面在背景時它不會觸發。
+  // 拍三次的用意：若視口會自己從矮變高，這三筆就看得出來是「自己會好」
+  // 還是「非得等使用者輸入」。
+  save('啟動 0 秒');
+  setTimeout(() => save('啟動 1 秒'), 1000);
+  setTimeout(() => save('啟動 3 秒'), 3000);
+
+  // 第一次按到數字鍵盤時再量一次。用捕獲階段監聽，不必動到記帳頁的程式。
+  document.addEventListener('click', (e) => {
+    if (firstInputDone) return;
+    if (!e.target.closest?.('.keypad')) return;
+    firstInputDone = true;
+    setTimeout(() => save('第一次輸入後'), 150);
+  }, true);
 }
 
 
