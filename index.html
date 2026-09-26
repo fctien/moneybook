@@ -12,10 +12,21 @@
 <meta name="theme-color" content="#2563eb" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#0f172a" media="(prefers-color-scheme: dark)">
 
-<!-- iOS 專用：加到主畫面後以全螢幕模式開啟，狀態列文字轉為淺色 -->
+<!--
+  iOS 專用：加到主畫面後以獨立 App 模式開啟。
+
+  status-bar-style 刻意「不用」black-translucent。
+  black-translucent 會讓網頁畫到狀態列底下，但實測在這台 iPhone 上
+  iOS 只給了 812 點高的網頁視窗（螢幕是 874），視窗貼在最上面，
+  於是底部空出 62 點 —— 那塊在網頁外面，CSS 怎麼寫都畫不到。
+  用 default 讓 iOS 自己把視窗排在狀態列底下，視窗就會一路延伸到螢幕底部。
+
+  代價：內容不再畫到狀態列底下，狀態列是系統自己的底色。
+  換掉的是「底部空一塊」，我認為划算。
+-->
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="MoneyBook">
 <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
 <link rel="icon" href="./icons/icon-192.png" sizes="192x192">
