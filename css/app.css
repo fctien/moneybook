@@ -74,19 +74,14 @@ body {
 body.is-locked { overflow: hidden; }
 
 /*
- * 這裡原本有一條 [hidden] { display: none !important; }。
+ * `.install-banner` 的 class 寫了 display: flex，會蓋過瀏覽器內建的
+ * [hidden]{display:none}（作者樣式永遠贏過 UA 樣式）。於是 node.hidden = true
+ * 之後元素還在，留下 10 + 10 + 1 = 21px 的空帶，夾在「完成」與分頁列之間。
  *
- * 它修的是：`.install-banner` 的 class 寫了 display: flex，會蓋過瀏覽器內建的
- * [hidden]{display:none}（作者樣式永遠贏過 UA 樣式），於是 node.hidden = true
- * 之後元素還在，留下 10+10+1 = 21px 的空帶與一條上框線。
- *
- * 使用者要求把版面位置改回 2026-09-26 09:21 之前（v1.18.0）的樣子，
- * 而那 21px 正是當時與現在唯一的幾何差異，所以這條規則移除。
- * 這等於把那條空帶放回來 —— 我仍然認為它是缺陷，但位置由使用者決定。
- *
- * 其他用到 hidden 的元素（funds.js 的匯率欄位）class 沒有設 display，
- * 瀏覽器內建規則本來就管得到，不受影響。
+ * 歷程：v1.18.2 修掉 → v1.22.1 依使用者要求還原（要回到 9:21 之前的位置）
+ * → 使用者指出那就是中間的 gap，再次修掉。
  */
+[hidden] { display: none !important; }
 
 button, input, textarea, select {
   font: inherit;
