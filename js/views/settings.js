@@ -151,7 +151,9 @@ export function createSettingsView({ appVersion = '1.0.0', installer = null, ope
         ['body 高度', `${Math.round(document.body.scrollHeight)}`],
         ['body 比視窗高', `${Math.round(document.body.scrollHeight - innerHeight)}`],
         ['裝置像素比', `${devicePixelRatio}`],
-        ['safe-area 上', cs.getPropertyValue('--safe-top').trim() || '0px'],
+        ['safe-area 上（實際套用）', cs.getPropertyValue('--safe-top').trim() || '0px'],
+        ['safe-area 上（系統回報）', getComputedStyle(document.body).getPropertyValue('padding-top') === '' ? '—' : (globalThis.CSS?.supports?.('top: env(safe-area-inset-top)') ? '支援 env()' : '不支援 env()')],
+        ['上方內距已手動歸零', store.safeTopOverridden() ? '是' : '否'],
         ['safe-area 下', cs.getPropertyValue('--safe-bottom').trim() || '0px'],
         ['App 高度', appBox ? `${Math.round(appBox.height)}` : '—'],
         ['App 底部座標', appBox ? `${Math.round(appBox.bottom)}` : '—'],
@@ -201,8 +203,24 @@ export function createSettingsView({ appVersion = '1.0.0', installer = null, ope
               if (ok) e.target.textContent = '✓ 已複製';
             },
           }, ['複製診斷資訊']),
-          // 數字說得出「視口比螢幕短」，但說不出短的那塊在上面還是下面。
-          // 把 App 的邊界畫出來，截一張圖就知道了 —— 紅框外面就是 App 碰不到的地方。
+          // 缺的那塊在上面還是下面，沒辦法從 JS 可靠地判斷 —— 但使用者看一眼就知道。
+          // 這顆按鈕把上方 safe-area 內距歸零：如果畫面因此對了，代表視口本來就已經
+          // 排除狀態列那塊、我們墊了第二次；如果內容跑到瀏海底下，代表不是這個原因。
+          el('button.btn.btn--ghost', {
+            type: 'button',
+            onClick: async (e) => {
+              const next = !store.safeTopOverridden();
+              await store.setSafeTopOverride(next);
+              e.target.textContent = next ? '↩ 復原上方內距' : '試：取消上方內距';
+              toast(
+                next
+                  ? '已取消上方內距。關掉這頁看一下：版面對了嗎？內容有沒有被瀏海擋住？'
+                  : '已復原。',
+                'info', 6000,
+              );
+            },
+          }, [store.safeTopOverridden() ? '↩ 復原上方內距' : '試：取消上方內距']),
+          // 把 App 的邊界畫出來，截一張圖就知道缺口在哪一邊
           el('button.btn.btn--ghost', {
             type: 'button',
             onClick: () => {

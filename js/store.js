@@ -632,6 +632,32 @@ export async function setSetting(key, value, { silent = false } = {}) {
   if (!silent) notify();
 }
 
+/**
+ * 版面覆寫：把上方 safe-area 內距強制歸零。
+ *
+ * iOS 給網頁視口的高度與位置，在某些裝置上與 env(safe-area-inset-top) 對不起來：
+ * 視口已經被排除狀態列那塊了，卻照樣回報一個非零的上緣內距，
+ * 於是內距被墊了兩次。這件事沒辦法從 JS 可靠地偵測，
+ * 所以做成使用者可以自己切換的開關 —— 按一下就知道哪一種才對。
+ */
+export const SAFE_TOP_OVERRIDE_KEY = 'safeTopOverride';
+
+export function safeTopOverridden() {
+  return getSetting(SAFE_TOP_OVERRIDE_KEY, false) === true;
+}
+
+export async function setSafeTopOverride(on) {
+  await setSetting(SAFE_TOP_OVERRIDE_KEY, on === true, { silent: true });
+  applySafeTopOverride();
+}
+
+/** 把設定套到 CSS 變數上。啟動時與切換時都要呼叫。 */
+export function applySafeTopOverride() {
+  const root = document.documentElement;
+  if (safeTopOverridden()) root.style.setProperty('--safe-top', '0px');
+  else root.style.removeProperty('--safe-top');
+}
+
 export function getSetting(key, fallback = null) {
   return state.settings[key] ?? fallback;
 }
