@@ -632,52 +632,6 @@ export async function setSetting(key, value, { silent = false } = {}) {
   if (!silent) notify();
 }
 
-/**
- * 版面覆寫：把上方 safe-area 內距強制歸零。
- *
- * iOS 給網頁視口的高度與位置，在某些裝置上與 env(safe-area-inset-top) 對不起來：
- * 視口已經被排除狀態列那塊了，卻照樣回報一個非零的上緣內距，
- * 於是內距被墊了兩次。這件事沒辦法從 JS 可靠地偵測，
- * 所以做成使用者可以自己切換的開關 —— 按一下就知道哪一種才對。
- */
-export const SAFE_TOP_OVERRIDE_KEY = 'safeTopOverride';
-/**
- * 下緣同理。視口若沒有延伸到螢幕底部，home indicator 就不在視口裡，
- * 這時分頁列還照著 env(safe-area-inset-bottom) 墊一塊就是白白浪費。
- */
-export const SAFE_BOTTOM_OVERRIDE_KEY = 'safeBottomOverride';
-
-export function safeTopOverridden() {
-  return getSetting(SAFE_TOP_OVERRIDE_KEY, false) === true;
-}
-
-export function safeBottomOverridden() {
-  return getSetting(SAFE_BOTTOM_OVERRIDE_KEY, false) === true;
-}
-
-export async function setSafeTopOverride(on) {
-  await setSetting(SAFE_TOP_OVERRIDE_KEY, on === true, { silent: true });
-  applySafeAreaOverrides();
-}
-
-export async function setSafeBottomOverride(on) {
-  await setSetting(SAFE_BOTTOM_OVERRIDE_KEY, on === true, { silent: true });
-  applySafeAreaOverrides();
-}
-
-/** 把設定套到 CSS 變數上。啟動時與切換時都要呼叫。 */
-export function applySafeAreaOverrides() {
-  const root = document.documentElement;
-  if (safeTopOverridden()) root.style.setProperty('--safe-top', '0px');
-  else root.style.removeProperty('--safe-top');
-
-  if (safeBottomOverridden()) root.style.setProperty('--safe-bottom', '0px');
-  else root.style.removeProperty('--safe-bottom');
-}
-
-/** 舊名稱，避免呼叫端漏改 */
-export const applySafeTopOverride = applySafeAreaOverrides;
-
 export function getSetting(key, fallback = null) {
   return state.settings[key] ?? fallback;
 }

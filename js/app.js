@@ -14,7 +14,7 @@ import {
   isStandalone, detectPlatform, createInstallPromptController, shouldShowInstallBanner,
 } from './lib/install.js';
 
-export const APP_VERSION = '1.29.3';
+export const APP_VERSION = '1.30.0';
 
 const TABS = [
   { id: 'entry', label: '記帳', icon: '✏️' },
@@ -46,12 +46,6 @@ async function main() {
   }
 
   loading?.remove();
-  // 這一版是「完整還原到 v1.18.0 版面」給使用者對照用的。
-  // 診斷用的 safe-area 覆寫開關若還開著，看到的就不是 v1.18.0 了，
-  // 因此啟動時一律歸零。要再試的話，進診斷畫面重新開啟即可。
-  await store.setSafeTopOverride(false);
-  await store.setSafeBottomOverride(false);
-  store.applySafeAreaOverrides();
 
   views.entry = createEntryView({ onSaved: () => { /* 留在記帳頁，方便連續記帳 */ } });
   views.ledger = createLedgerView({
@@ -89,109 +83,10 @@ async function main() {
   maybeShowFirstRunGuide();
   startAutoQuoteUpdates();
   keepWindowPinned();
-  watchViewportHeight();
-  captureLayoutSnapshots();
-}
-
-/**
- * 版面快照：在「啟動當下」與「第一次按數字後」各量一次同樣的東西。
- *
- * 使用者觀察到「剛進去沒有滿版，輸入數字後就變長了」。
- * 要知道原因，得先知道**到底是哪一個數字變了** ——
- * 是 iOS 給的視口變高，還是我們自己的元素變高。
- * 兩份快照並排一看就分得出來，不必再猜。
- *
- * 只讀不寫，不會改動任何版面。
- */
-const LAYOUT_SNAPSHOT_KEY = 'layoutSnapshots';
-
-function captureLayoutSnapshots() {
-  const snaps = {};
-  let firstInputDone = false;
-
-  const measure = () => {
-    const box = (sel) => {
-      const el = document.querySelector(sel);
-      if (!el) return null;
-      const r = el.getBoundingClientRect();
-      return { t: Math.round(r.top), b: Math.round(r.bottom), h: Math.round(r.height) };
-    };
-    const cs = getComputedStyle(document.documentElement);
-    return {
-      時間: new Date().toTimeString().slice(0, 8),
-      innerHeight: globalThis.innerHeight,
-      visualViewport: Math.round(globalThis.visualViewport?.height ?? 0),
-      clientHeight: document.documentElement.clientHeight,
-      screenHeight: globalThis.screen?.height ?? 0,
-      scrollY: Math.round(globalThis.scrollY),
-      safeTop: cs.getPropertyValue('--safe-top').trim(),
-      safeBottom: cs.getPropertyValue('--safe-bottom').trim(),
-      app: box('.app'),
-      main: box('.app__main'),
-      tabbar: box('.tabbar'),
-      entryBottom: box('.entry-bottom'),
-    };
-  };
-
-  const save = (tag) => {
-    snaps[tag] = measure();
-    globalThis.__layoutSnaps = snaps;
-    store.setSetting(LAYOUT_SNAPSHOT_KEY, snaps, { silent: true }).catch(() => {});
-  };
-
-  // 啟動後連拍三次。不用 requestAnimationFrame —— 畫面在背景時它不會觸發。
-  // 拍三次的用意：若視口會自己從矮變高，這三筆就看得出來是「自己會好」
-  // 還是「非得等使用者輸入」。
-  // 不要在啟動流程裡同步讀版面 —— getBoundingClientRect() 會強迫瀏覽器
-  // 當下就把 layout 算定，那等於在量測的同時干擾被量測的對象。
-  // 一律排到下一個工作迴圈之後再量。
-  setTimeout(() => save('啟動 0 秒'), 0);
-  setTimeout(() => save('啟動 1 秒'), 1000);
-  setTimeout(() => save('啟動 3 秒'), 3000);
-
-  // 第一次按到數字鍵盤時再量一次。用捕獲階段監聽，不必動到記帳頁的程式。
-  document.addEventListener('click', (e) => {
-    if (firstInputDone) return;
-    if (!e.target.closest?.('.keypad')) return;
-    firstInputDone = true;
-    setTimeout(() => save('第一次輸入後'), 150);
-  }, true);
 }
 
 
-/**
- * 記錄視窗高度的變化。
- *
- * 使用者說「剛更新完是滿版的，用一陣子就跑版」。若真是如此，
- * innerHeight 會在使用途中變小而且不再回來 —— 這是唯一能證實或推翻的證據，
- * 而它只發生在真實裝置上，電腦重現不了。
- *
- * 只記在記憶體與設定裡，不送出去任何地方。
- */
-const VIEWPORT_LOG_KEY = 'viewportLog';
 
-function watchViewportHeight() {
-  const now = () => new Date().toTimeString().slice(0, 8);
-  const log = store.getSetting(VIEWPORT_LOG_KEY, null) || {};
-
-  const record = (why) => {
-    const h = globalThis.innerHeight;
-    log.last = h;
-    log.lastAt = now();
-    log.lastWhy = why;
-    if (!log.max || h > log.max) { log.max = h; log.maxAt = now(); }
-    if (!log.min || h < log.min) { log.min = h; log.minAt = now(); log.minWhy = why; }
-    // silent：純粹是診斷資料，不需要因此重畫任何畫面
-    store.setSetting(VIEWPORT_LOG_KEY, log, { silent: true }).catch(() => {});
-  };
-
-  record('啟動');
-  globalThis.addEventListener('resize', () => record('resize'));
-  globalThis.addEventListener('orientationchange', () => setTimeout(() => record('轉向'), 300));
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') setTimeout(() => record('回到前景'), 300);
-  });
-}
 
 /**
  * 把視窗釘在最上面。
