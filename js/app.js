@@ -14,7 +14,7 @@ import {
   isStandalone, detectPlatform, createInstallPromptController, shouldShowInstallBanner,
 } from './lib/install.js';
 
-export const APP_VERSION = '1.30.0';
+export const APP_VERSION = '1.31.0';
 
 const TABS = [
   { id: 'entry', label: '記帳', icon: '✏️' },
@@ -83,6 +83,46 @@ async function main() {
   maybeShowFirstRunGuide();
   startAutoQuoteUpdates();
   keepWindowPinned();
+  guardAppHeight();
+}
+
+/**
+ * 補足 App 高度的下限。
+ *
+ * iOS 剛開啟 PWA 時，`100dvh` 常常算成「扣掉狀態列」的高度（例如 812），
+ * 要等到某次重新排版才變成實際的全螢幕高度（874）——
+ * 使用者輸入數字就是那個觸發點，在那之前畫面下方會空一塊。
+ *
+ * 這裡取幾個來源裡最大的那個當下限。只用 `min-height`：
+ * **它只會讓 App 變高、不會變矮**，所以量錯了也不會比不做更糟。
+ * 這一點是刻意的 —— 先前直接覆寫 height 的做法把情況弄得更糟過一次。
+ */
+function guardAppHeight() {
+  const root = document.documentElement;
+
+  const apply = () => {
+    const sources = [
+      globalThis.innerHeight,
+      globalThis.visualViewport?.height,
+      document.documentElement.clientHeight,
+      // 已加到主畫面時，網頁其實是畫滿整個螢幕的（使用者輸入後的畫面可以證明），
+      // 所以螢幕高度是合理的下限；在 Safari 裡則不成立，工具列會佔掉一塊。
+      isStandalone() ? globalThis.screen?.height : 0,
+    ].filter((n) => Number.isFinite(n) && n > 0);
+
+    if (!sources.length) return;
+    root.style.setProperty('--app-min-h', `${Math.round(Math.max(...sources))}px`);
+  };
+
+  apply();
+  globalThis.addEventListener('resize', apply);
+  globalThis.visualViewport?.addEventListener('resize', apply);
+  globalThis.addEventListener('orientationchange', () => setTimeout(apply, 300));
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') setTimeout(apply, 200);
+  });
+  // iOS 有時要幾百毫秒才把視口定下來，多補幾次
+  for (const t of [100, 400, 1200, 2500]) setTimeout(apply, t);
 }
 
 

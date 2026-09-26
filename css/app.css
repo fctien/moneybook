@@ -94,6 +94,14 @@ button { cursor: pointer; }
   flex-direction: column;
   height: 100vh;
   height: 100dvh; /* 手機網址列收合時 100vh 會算錯，dvh 才是實際可視高度 */
+  /*
+   * 保險：iOS 剛開啟 PWA 時 100dvh 常常算成「扣掉狀態列」的高度，
+   * 要等到某次重新排版（例如使用者輸入）才變成正確值，在那之前底下會空一塊。
+   *
+   * 用 min-height 而不是覆寫 height，是因為它**只會讓 App 變高、不會變矮** ——
+   * 就算 app.js 量錯了，也不會比現在更糟。預設 0 代表完全不干預。
+   */
+  min-height: var(--app-min-h, 0px);
 }
 
 .app__main {
