@@ -148,30 +148,34 @@ export function createSettingsView({ appVersion = '1.0.0', installer = null, ope
         ['畫面底部剩餘空白', appBox ? `${Math.round(innerHeight - appBox.bottom)}` : '—'],
       ];
 
-      body.append(
-        el('p.sheet__message', {
-          text: '這些是這台裝置回報的實際數字。若版面看起來不對，把這一頁的內容複製給我。',
-        }),
-        el('dl.detail-list', {}, rows.flatMap(([k, v]) => [
-          el('dt', { text: k }),
-          el('dd', { text: v }),
-        ])),
-      );
-
       const text = [
         ...rows.map(([k, v]) => `${k}: ${v}`),
         `UA: ${navigator.userAgent}`,
       ].join(String.fromCharCode(10));
 
-      body.append(el('div.sheet__actions', {}, [
-        el('button.btn.btn--primary', {
-          type: 'button',
-          onClick: async () => {
-            const ok = await copyToClipboard(text);
-            toast(ok ? '已複製，可直接貼上回報' : '複製失敗，請手動抄寫', ok ? 'success' : 'error');
-          },
-        }, ['複製診斷資訊']),
-      ]));
+      body.append(
+        el('p.sheet__message', {
+          text: '這些是這台裝置回報的實際數字。若版面看起來不對，把它複製給我。',
+        }),
+        // 按鈕放最上面：這張表有十幾列，擺在最後的話在小螢幕上要捲很久才看得到，
+        // 使用者會以為根本沒有這顆按鈕
+        el('div.sheet__actions', {}, [
+          el('button.btn.btn--primary', {
+            type: 'button',
+            onClick: async (e) => {
+              const ok = await copyToClipboard(text);
+              toast(ok ? '已複製，可直接貼上回報' : '複製失敗，請改用下方長按選取', ok ? 'success' : 'error');
+              if (ok) e.target.textContent = '✓ 已複製';
+            },
+          }, ['複製診斷資訊']),
+        ]),
+        // 剪貼簿 API 在 iOS 某些情境會被擋掉，留一塊可以長按選取的純文字當備援
+        el('pre.diag-text', { text }),
+        el('dl.detail-list', {}, rows.flatMap(([k, v]) => [
+          el('dt', { text: k }),
+          el('dd', { text: v }),
+        ])),
+      );
     });
   }
 

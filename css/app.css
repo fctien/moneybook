@@ -861,7 +861,9 @@ button { cursor: pointer; }
 
 .sheet {
   width: 100%;
-  max-height: 88vh;
+  /* 不用 vh：backdrop 已經是 fixed inset:0，高度是確定的，
+     用百分比才不會受 iOS 工具列伸縮影響而讓面板底部跑到畫面外 */
+  max-height: 88%;
   background: var(--c-surface);
   border-radius: 18px 18px 0 0;
   display: flex;
@@ -915,6 +917,22 @@ button { cursor: pointer; }
 }
 .detail-list dt { color: var(--c-text-muted); }
 .detail-list dd { margin: 0; text-align: right; word-break: break-all; }
+
+/* 版面診斷的純文字備援，要可以長按選取 */
+.diag-text {
+  margin: 10px 0;
+  padding: 10px 12px;
+  background: var(--c-surface-2);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-sm);
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 11px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-all;
+  user-select: text;
+  -webkit-user-select: text;
+}
 
 /* ------------------------------------------------------------------ 提示訊息 */
 
