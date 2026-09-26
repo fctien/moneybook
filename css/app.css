@@ -237,12 +237,15 @@ button { cursor: pointer; }
 
 .amount-box {
   text-align: right;
-  padding: 8px 2px 2px;
-  min-height: 62px;
+  /* 全部改用 em：使用者把字體調大時，這塊要跟著長，而不是把數字擠爆 */
+  padding: 0.25em 2px 2px;
+  min-height: 2.6em;
 }
 
 .amount-display {
-  font-size: 34px;
+  /* 1.9em 在預設 15px 下約 28px（原本寫死 34px）。
+     縮小一點，把空間讓給下面的分類；用 em 才會跟著字體設定走。 */
+  font-size: 1.9em;
   font-weight: 600;
   letter-spacing: -0.5px;
   line-height: 1.1;
